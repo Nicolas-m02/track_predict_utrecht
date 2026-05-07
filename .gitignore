@@ -1,0 +1,16 @@
+*.mha
+/data/
+/logs/
+/sam3/
+/code/eval*
+/constantin_codes/
+/segmentation/autoprompting_experiments/
+/segmentation/scripts/
+*.dat
+*.dcm
+*.pth
+*.png
+*.pt
+*.sif
+*.pth
+*.tsv

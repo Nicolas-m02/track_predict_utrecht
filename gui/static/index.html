@@ -1,0 +1,50 @@
+"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Streaming Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h2>Tracking Video Stream</h2>
+    <img id="video" width="320" />
+
+    <h2>Predictions</h2>
+    <canvas id="chart"></canvas>
+
+    <script>
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+
+        const ctx = document.getElementById('chart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Predicted Value',
+                    data: []
+                }]
+            }
+        });
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            // Update video
+            document.getElementById('video').src = 'data:image/jpeg;base64,' + data.frame;
+
+            // Update chart
+            chart.data.labels.push(data.t);
+            chart.data.datasets[0].data.push(data.value);
+
+            if (chart.data.labels.length > 200) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+
+            chart.update('none'); // low latency
+        };
+    </script>
+</body>
+</html>
+"""

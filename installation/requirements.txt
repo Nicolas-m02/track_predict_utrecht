@@ -1,0 +1,9 @@
+openpyxl==3.0.10
+scikit-posthocs==0.6.7
+SimpleITK==1.2.4
+neptune==1.13.0
+torchviz==0.0.3
+graphviz==0.20.3
+natsort==8.4.0
+trimesh==4.10.1
+
