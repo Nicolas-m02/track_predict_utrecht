@@ -24,7 +24,7 @@ s.connect((host, port))
 
 print(f'Connected to server at {host}:{port}')
 
-virt_framerate = 11
+virt_framerate = 5
 
 print(f'Sending images at a framerate of {virt_framerate} fps...')
 time.sleep(1)  # Wait for a moment before sending data
@@ -34,15 +34,15 @@ with open(logfile, 'w') as f:
 
 
 im_bytes_list = []
-end_point = 700
+end_point = 200
 
-for i,file in enumerate(sorted(os.listdir('/utrecht_exp/data/test_images/')[:end_point])):
-    file = sitk.ReadImage('/utrecht_exp/data/test_images/' + file)
+for i,file in enumerate(sorted([f for f in os.listdir('/utrecht_exp/data/mha_converted/')[:end_point] if f.endswith('.mha')])):
+    file = sitk.ReadImage('/utrecht_exp/data/mha_converted/' + file)
     file_bytes = sitk.GetArrayFromImage(file).tobytes()
     im_bytes_list.append(file_bytes)
 
 
-for i,file in enumerate(sorted(os.listdir('/utrecht_exp/data/test_images/')[:end_point])):
+for i,file in enumerate(sorted([f for f in os.listdir('/utrecht_exp/data/mha_converted/')[:end_point] if f.endswith('.mha')])):
 
     start_time = time.time()
     file_bytes = im_bytes_list[i]
@@ -63,4 +63,15 @@ print('Finished sending images, closing connection.')
 s.close()
 s.shutdown(socket.SHUT_RDWR)
 
+
+#%%
+
+
+import SimpleITK as sitk
+
+file = sitk.ReadImage('/utrecht_exp/data/mha_converted/img_0001.mha')
+
+print(file.GetSize())
+
+print(file.GetPixelIDTypeAsString())
 

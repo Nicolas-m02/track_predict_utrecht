@@ -13,7 +13,7 @@ port = 9001  # change to 1221 for COM from SAM2
 testing = False
 
 lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
-
+os.chdir('/utrecht_exp/code/socket_experiments')
 from socket_model import LSTM
 
 device = torch.device('cuda:1' if torch.cuda.is_available() and torch.cuda.device_count() > 1 else 'cpu')
@@ -115,7 +115,7 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
-        self.logging = False
+        self.logging = True
         self.first_data_point_received = False
 
         # Params for GUI
@@ -333,7 +333,7 @@ async def main():
 # run concurrent script
 import asyncio
 
-await main()
+asyncio.run(main())
 
 # aysncio.run(main())
 

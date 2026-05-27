@@ -159,7 +159,7 @@ def save_numpy_as_dicom_with_geometry(
 HEADER_SIZE = 4 * 4
 TRAILER_SIZE = 4
 
-folder = "/utrecht_exp/data/all_dat_files/dat_data/"
+folder = "/utrecht_data/20260226/img_2.5ppcard_60bpm"
 out_dir = "/utrecht_exp/data/dicom_output_20260505"
 os.makedirs(out_dir, exist_ok=True)
 

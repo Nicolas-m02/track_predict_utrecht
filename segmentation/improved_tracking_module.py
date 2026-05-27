@@ -12,16 +12,17 @@ import matplotlib.pyplot as plt
 os.chdir("/utrecht_exp/segmentation/")
 import torch
 
-host_rec = 'localhost' 
-port_rec = 1220
-host_send = 'utrecht_prediction_01'
+host_rec = '0.0.0.0' 
+port_rec = 6056
+host_send = 'prediction_container'
 port_send = 9001
 
 # SAM2 Configs
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 sam_mask_threshold = 0.0
 
-sam_type = "small"  
+sam_type = "tiny"  # Options: "large", "small"
 
 if sam_type == "large":
     overwrite_checkpoint = "./sam2.1_hiera_large.pt"
@@ -29,6 +30,9 @@ if sam_type == "large":
 elif sam_type == "small":
     overwrite_checkpoint= "./sam2_hiera_small.pt"
     overwrite_model_cfg= "sam2_hiera_s.yaml"
+elif sam_type == "tiny":
+    overwrite_checkpoint= "./sam2_hiera_tiny.pt"
+    overwrite_model_cfg= "sam2_hiera_t.yaml"
 
 from sam2.build_sam import build_sam2_camera_predictor
 
@@ -55,7 +59,8 @@ class ReceiveImages:
 
     def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0):
         #self.seen_images = []
-
+        
+        self.zmq_prot = True 
         
 
         # Asyncio queue
@@ -97,23 +102,32 @@ class ReceiveImages:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
 
     def connect(self, host=host_rec, port=port_rec):
-        if self.protocol.lower() == 'tcp':
-            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.s.bind((host, port))
-            self.s.listen(1)
-            print("Tracking module waiting for TCP connection...")
-            self.conn, self.addr = self.s.accept()
-            print("Connected by", self.addr)
-        elif self.protocol.lower() == 'udp':
-            self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.s.bind((host, port))
-            print("Tracking module waiting for UDP connection...")
-            self.conn = self.s
-            self.addr = (host, port)
+        if self.zmq_prot:
+            import zmq
+            self.context = zmq.Context()
+            self.socket = self.context.socket(zmq.SUB)
+            self.socket.bind(f"tcp://{host}:{port}")
+            self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
+            print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
+            self.conn = self.socket
         else:
-            raise ValueError("Protocol must be 'tcp' or 'udp'")
+            if self.protocol.lower() == 'tcp':
+                self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.s.bind((host, port))
+                self.s.listen(1)
+                print("Tracking module waiting for TCP connection...")
+                self.conn, self.addr = self.s.accept()
+                print("Connected by", self.addr)
+            elif self.protocol.lower() == 'udp':
+                self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.s.bind((host, port))
+                print("Tracking module waiting for UDP connection...")
+                self.conn = self.s
+                self.addr = (host, port)
+            else:
+                raise ValueError("Protocol must be 'tcp' or 'udp'")
 
     def connect_send(self, host=host_send, port=port_send):
         if self.send_data:
@@ -133,41 +147,127 @@ class ReceiveImages:
 
 
     async def receive_images(self):
-        while True:
-            # Receive the size of the incoming image
-            loop = asyncio.get_running_loop()
-            data = await loop.sock_recv(self.conn, 4)
-            if data is not None:
-                start_time = time.time()
-                img_size = struct.unpack('!I', data)[0]
-                #print(img_size)
-                # Receive the image data based on the size
-                img_data = b''
-                while len(img_data) < img_size:
-                    packet = await loop.sock_recv(self.conn, img_size - len(img_data))
-                    img_data += packet
+        if self.zmq_prot:
+            while True:
 
-                # Convert the byte data to a numpy array and reshape it to the original image dimensions
-                img_array = np.frombuffer(img_data, dtype=np.uint16)
-                # print('Received image of size:', img_array.size)
-                img_array = img_array.reshape(self.image_dimensions)  # Adjust dimensions as needed
-                end_time = time.time()
-                #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
-                #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
+                # receive message
+                msg = self.conn.recv()
+
+                # find beginning of binary image data
+                sep = b"DATA\n"
+
+                idx = msg.find(sep)
+
+                if idx == -1:
+                    print("no DATA separator found")
+                    continue
+
+                # split header and binary payload
+                
+                
+                header = msg[:idx].decode("latin-1")  # use latin-1 to preserve byte values
+                print(len(header), "bytes of header")
+                print("header:", header)
+                
+
+                meta = {}
+
+                for line in header.splitlines():
+
+                    parts = line.strip().split()
+
+                    if len(parts) == 0:
+                        continue
+
+                    key = parts[0]
+
+                    if key == "timestamp":
+                        meta["timestamp"] = int(parts[1])
+
+                    elif key == "dim":
+                        meta["dim"] = [int(x) for x in parts[1:]]
+
+                    elif key == "fov":
+                        meta["fov"] = [float(x) for x in parts[1:]]
+
+                    elif key == "resolution":
+                        meta["resolution"] = [float(x) for x in parts[1:]]
+
+                print("received image")
+                print(meta)
+                
+                raw = msg[idx + len(sep):]
+
+                arr = np.frombuffer(raw, dtype=np.float32)
+                print("received bytes with shape", arr.shape)
+
+                img_array = arr.reshape(meta["dim"])
+                """
+                plt.clf()
+                
+                if img_array.ndim == 2:
+                    plt.imshow(img_array, cmap="gray")
+
+                elif img_array.ndim == 3:
+                    # show first slice
+                    plt.imshow(img_array[0], cmap="gray")
+
+                else:
+                    print("unsupported dimensions:", img_array.shape)
+
+                plt.title(f"shape={img_array.shape}")
+                plt.pause(0.001)
+                """
+
+
                 await self.seen_images_queue.put(img_array)
 
                 if self.logging:
                     with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
                         f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
 
+                await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
+
+
+        else:
+            while True:
+                # Receive the size of the incoming image
+                loop = asyncio.get_running_loop()
+                data = await loop.sock_recv(self.conn, 4)
+                if data is not None:
+                    print(f"Received data for frame {self.frame_no + 1} at {datetime.datetime.now()}")
+                    start_time = time.time()
+                    img_size = struct.unpack('!I', data)[0]
+                    #print(img_size)
+                    # Receive the image data based on the size
+                    img_data = b''
+                    while len(img_data) < img_size:
+                        packet = await loop.sock_recv(self.conn, img_size - len(img_data))
+                        img_data += packet
+
+                    # Convert the byte data to a numpy array and reshape it to the original image dimensions
+                    img_array = np.frombuffer(img_data, dtype=np.float32)
+                    # print('Received image of size:', img_array.size)
+                    img_array = img_array.reshape(self.image_dimensions)  # Adjust dimensions as needed
+                    
+                    img_array = img_array.astype(np.uint16)  # Convert to uint8 for OpenCV processing
+                    end_time = time.time()
+                    #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
+                    print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
+                    await self.seen_images_queue.put(img_array)
+
+                    if self.logging:
+                        with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                            f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
+
                 #print(f"Number of seen images: {len(self.seen_images)}")
-            await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
+                await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
                 
 
     async def preprocess_image(self):
         while True:
             image = await self.seen_images_queue.get()
-
+            
             prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
             self.preprocessed_images_queue.put_nowait(prep_image)
             #return prep_image
@@ -197,7 +297,7 @@ class ReceiveImages:
                             print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
 
                         else:
-                            #print("Tracking new frame...")
+                            print("Tracking new frame...")
                             _, out_mask_logits = self.predictor.track(image)
                             out_mask = out_mask_logits>sam_mask_threshold
                             self.masks_queue.put_nowait(out_mask)
@@ -252,7 +352,7 @@ class ReceiveImages:
     
 print("Initializing improved tracking module...")
 async def main():
-    image_receiver = ReceiveImages(send_data=True)
+    image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128))
     image_receiver.initialize_prompt()
     image_receiver.connect(host=host_rec, port=port_rec)
     image_receiver.connect_send(host=host_send, port=port_send)
@@ -265,11 +365,19 @@ async def main():
         image_receiver.send_com()
     )
 
-await main()
+asyncio.run(main())
 
 
 
 
+#%%
 
+import torch
+
+torch.cuda.is_available()
+
+print(torch.cuda.get_device_name(1))
+print(torch.__version__)
+print(torch.cuda.device_count())
 
 
