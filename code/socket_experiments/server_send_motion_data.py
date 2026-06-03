@@ -15,7 +15,7 @@ import torch
 
 #data =  pd.read_csv("/utrecht_exp/data/sub-0001_task-restingstate_acq-mb3_recording-respcardiac_physio.tsv",sep='\t')
 
-data = np.loadtxt('/utrecht_exp/data/eval_199CORfixed_angles_trace_3_outer.npy')
+data = np.loadtxt('/utrecht_exp/data/2_1_COR_0_fixed_angles_trace_3_outer.npy')
 
 
 # Create a socket object
