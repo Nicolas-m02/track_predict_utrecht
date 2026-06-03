@@ -9,7 +9,7 @@ import struct
 import numpy as np
 
 host = "0.0.0.0"
-port = 9001  # change to 1221 for COM from SAM2
+port = 9002  # change to 1221 for COM from SAM2
 testing = False
 
 lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
@@ -115,7 +115,7 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
-        self.logging = False
+        self.logging = True
         self.first_data_point_received = False
 
         # Params for GUI
@@ -269,7 +269,7 @@ class predictor:
                     if output is not None:
                         self.prediction_queue.put_nowait(output)
                     
-                        print("Queue size:", self.prediction_queue.qsize())
+                        #print("Queue size:", self.prediction_queue.qsize())
             
                 await asyncio.sleep(0.001) 
                 
