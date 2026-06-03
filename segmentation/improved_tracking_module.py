@@ -12,17 +12,28 @@ import matplotlib.pyplot as plt
 os.chdir("/utrecht_exp/segmentation/")
 import torch
 
+<<<<<<< HEAD
 host_rec = '0.0.0.0' 
 port_rec = 6056
 host_send = 'prediction_container'
 port_send = 9001
+=======
+host_rec = 'localhost' 
+port_rec = 1220
+host_send = 'utrecht_prediction_01'
+port_send = 9002
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 
 # SAM2 Configs
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 sam_mask_threshold = 0.0
 
+<<<<<<< HEAD
 sam_type = "tiny"  # Options: "large", "small"
+=======
+sam_type = "small"  # Options: "large", "small"
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 
 if sam_type == "large":
     overwrite_checkpoint = "./sam2.1_hiera_large.pt"
@@ -60,9 +71,17 @@ class ReceiveImages:
     def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0):
         #self.seen_images = []
         
+<<<<<<< HEAD
         self.zmq_prot = False 
         self.emulation = True        
         self.emu_path = "/utrecht_data/20260323/340/"
+=======
+        self.zmq_prot = True 
+        # Receiving data params
+        self.emulation = False
+        self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
+
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
         self.preprocessed_images_queue = asyncio.Queue(maxsize=max_queue_size)
@@ -80,7 +99,7 @@ class ReceiveImages:
         self.frame_no = 0
 
         # Testing params
-        self.break_point = 10000  # Set a break point after which to stop receiving images for testing purposes
+        self.break_point = 100  # Set a break point after which to stop receiving images for testing purposes
         
 
         # SAM 2 initialization
@@ -110,13 +129,33 @@ class ReceiveImages:
             self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
             print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
             self.conn = self.socket
+<<<<<<< HEAD
         elif self.emulation:
             print("Emulation mode enabled, not setting up actual socket connection")
+=======
+        elif self.protocol.lower() == 'tcp' and not self.emulation:
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.s.bind((host, port))
+            self.s.listen(1)
+            print("Tracking module waiting for TCP connection...")
+            self.conn, self.addr = self.s.accept()
+            print("Connected by", self.addr)
+        elif self.protocol.lower() == 'udp' and not self.emulation:
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.s.bind((host, port))
+            print("Tracking module waiting for UDP connection...")
+            self.conn = self.s
+            self.addr = (host, port)
+        elif self.emulation:
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
             import pymri
             self.handler = pymri.QueuedImageHandler()
             self.recv = pymri.EmuImageReceiver.create(self.emu_path, self.handler)
 
         else:
+<<<<<<< HEAD
             if self.protocol.lower() == 'tcp':
                 self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -133,6 +172,8 @@ class ReceiveImages:
                 self.conn = self.s
                 self.addr = (host, port)
             else:
+=======
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
                 raise ValueError("Protocol must be 'tcp' or 'udp'")
 
     def connect_send(self, host=host_send, port=port_send):
@@ -234,6 +275,7 @@ class ReceiveImages:
 
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
 
+<<<<<<< HEAD
         elif self.emulation:
             while True:
 
@@ -250,6 +292,12 @@ class ReceiveImages:
         else:
             while True:
                 # Receive the size of the incoming image
+=======
+
+        elif not self.emulation:
+            while True:
+                # Workflow for sending images from seperate python scripts
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
                 loop = asyncio.get_running_loop()
                 data = await loop.sock_recv(self.conn, 4)
                 if data is not None:
@@ -263,6 +311,7 @@ class ReceiveImages:
                         packet = await loop.sock_recv(self.conn, img_size - len(img_data))
                         img_data += packet
 
+<<<<<<< HEAD
                     # Convert the byte data to a numpy array and reshape it to the original image dimensions
                     img_array = np.frombuffer(img_data, dtype=np.float32)
                     # print('Received image of size:', img_array.size)
@@ -273,12 +322,39 @@ class ReceiveImages:
                     #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
                     print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
                     await self.seen_images_queue.put(img_array)
+=======
+                        # Convert the byte data to a numpy array and reshape it to the original image dimensions
+                        img_array = np.frombuffer(img_data, dtype=np.float32)
+                        # print('Received image of size:', img_array.size)
+                        img_array = img_array.reshape(self.image_dimensions)  # Adjust dimensions as needed
+                        
+                        img_array = img_array.astype(np.uint16)  # Convert to uint8 for OpenCV processing
+                        end_time = time.time()
+                        #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
+                        print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
+                        await self.seen_images_queue.put(img_array)
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 
                     if self.logging:
                         with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
                             f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
 
+<<<<<<< HEAD
                 #print(f"Number of seen images: {len(self.seen_images)}")
+=======
+        elif self.emulation:
+            while True:
+                image = self.handler.get_image()
+
+                if image is not None:
+                    await self.seen_images_queue.put(image['data'])
+
+                    if self.logging:
+                        with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                            f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
+
+
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
                 
 
@@ -372,8 +448,9 @@ print("Initializing improved tracking module...")
 async def main():
     image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128))
     image_receiver.initialize_prompt()
-    image_receiver.connect(host=host_rec, port=port_rec)
     image_receiver.connect_send(host=host_send, port=port_send)
+    image_receiver.connect(host=host_rec, port=port_rec)
+
     print("Starting tracking...")
     await asyncio.gather(
         image_receiver.receive_images(),

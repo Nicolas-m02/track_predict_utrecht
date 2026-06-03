@@ -17,14 +17,18 @@ s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 host = 'localhost'  # or use 'utrecht_gui_02' 
 port = 1220
 
-logfile = f"/utrecht_exp/logs/real_time_image_send_log.txt"
+logfile = f"/utrecht_exp/gui/real_time_image_send_log.txt"
 
 # Connect to the server
 s.connect((host, port))
 
 print(f'Connected to server at {host}:{port}')
 
+<<<<<<< HEAD
 virt_framerate = 5
+=======
+virt_framerate = 8
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 
 print(f'Sending images at a framerate of {virt_framerate} fps...')
 time.sleep(1)  # Wait for a moment before sending data

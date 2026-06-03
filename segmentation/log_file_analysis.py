@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 
+=======
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 #%%
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,10 +15,6 @@ com_receive_file = '/utrecht_exp/logs/online_received.txt'
 
 predicted_com_file = '/utrecht_exp/logs/online_log.txt'
 
-
-with open(im_send_file, 'r') as f:
-    im_send_lines = f.readlines()
-
 with open(im_receive_file, 'r') as f:
     im_receive_lines = f.readlines()
 
@@ -28,13 +27,19 @@ with open(com_receive_file, 'r') as f:
 with open(predicted_com_file, 'r') as f:
     predicted_com_lines = f.readlines()
 
+<<<<<<< HEAD
 #im_send_lines = im_send_lines[2:]
+=======
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 im_receive_lines = im_receive_lines[2:]
 com_send_lines = com_send_lines[2:]
 com_receive_lines = com_receive_lines[2:]
 predicted_com_lines = predicted_com_lines[2:]
 
+<<<<<<< HEAD
 #print(f"Images sent: {len(im_send_lines)}")
+=======
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 print(f"Images received: {len(im_receive_lines)}")
 print(f"Center of mass sent: {len(com_send_lines)}")
 print(f"Center of mass received: {len(com_receive_lines)}")
@@ -46,6 +51,7 @@ receive_track_ims = []
 track_receive_coms = []
 receive_predict_coms = []
 
+<<<<<<< HEAD
 """
 for i in range(len(im_send_lines)):
     send_line = im_send_lines[i]
@@ -66,6 +72,8 @@ plt.legend()
 """
 
 
+=======
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 for i in range(len(com_send_lines)):
     receive_line = im_receive_lines[i]
     send_com_line = com_send_lines[i]
@@ -82,6 +90,7 @@ plt.plot(receive_track_ims, label=f'Receive Image to Send CoM Latency\n Mean: {n
 plt.xlabel('Frame Index')
 plt.ylabel('Latency (ms)')
 plt.legend()
+plt.savefig('/utrecht_exp/results/receive_image_to_send_com_latency.png')
 
 for i in range(len(com_receive_lines)):
     send_com_line = com_send_lines[i]
@@ -99,6 +108,7 @@ plt.xlabel('Frame Index')
 plt.ylabel('Latency (ms)')
 plt.title('Latency from sending center of mass to receiving it')
 plt.legend()
+plt.savefig('/utrecht_exp/results/send_com_to_receive_com_latency.png')
 
 for i in range(len(predicted_com_lines)):
     receive_com_line = com_receive_lines[99+i]
@@ -117,15 +127,15 @@ plt.xlabel('Frame Index')
 plt.ylabel('Latency (ms)')
 plt.title('Latency from receiving center of mass to prediction')
 plt.legend(loc='upper right')
-
+plt.savefig('/utrecht_exp/results/receive_com_to_prediction_latency.png')
 #%% end to end
 
 e2e_latencies = []
 for i in range(len(predicted_com_lines)):
-    sent_image_line = im_send_lines[99+i]
+    sent_image_line = im_receive_lines[99+i]
     predicted_com_line = predicted_com_lines[i]
 
-    if "Sent image" in sent_image_line and "Prediction" in predicted_com_line:
+    if "Received image" in sent_image_line and "Prediction" in predicted_com_line:
         t_diff = datetime.datetime.strptime(predicted_com_line.split(' at ')[-1].strip(), '%Y-%m-%d %H:%M:%S.%f') - datetime.datetime.strptime(sent_image_line.split(' at ')[-1].strip(), '%Y-%m-%d %H:%M:%S.%f')
         #print(f"Frame {i+1}: Time difference between receiving center of mass and prediction: {t_diff.total_seconds()*1000:.2f} ms")
         e2e_latencies.append(t_diff.total_seconds()*1000)
@@ -139,5 +149,9 @@ plt.plot(corrected_frames, [np.mean([x for x in e2e_latencies if x < 250])] * le
 plt.xlabel('Frame Index')
 plt.ylabel('Latency (ms)')
 plt.legend()
+<<<<<<< HEAD
+=======
+plt.savefig('/utrecht_exp/results/e2e.png')
+>>>>>>> 82ce67e3021ab2bf78827d10a8c81d3fd05ce321
 
 

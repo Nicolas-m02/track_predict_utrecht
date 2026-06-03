@@ -367,7 +367,7 @@ async def main():
 # run concurrent script
 import asyncio
 
-await main()
+asyncio.run(main())
 
 # aysncio.run(main())
 
