@@ -13,6 +13,13 @@ ADD requirements.txt /requirements.txt
 RUN pip install -q -U pip
 #RUN pip install -q -U manim
 
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libprotobuf32 \
+        libzmq5 && \
+    rm -rf /var/lib/apt/lists/*
+
 # check python version
 RUN python --version
 

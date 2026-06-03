@@ -103,8 +103,8 @@ def convert_to_lung(trace,hz,lung_thres=0.4):
         lung_trace = np.fft.ifft(lung_trace).real
         return lung_trace
 
-lung_trace = convert_to_lung(interpolated_trace, 10)
-heart_trace = convert_to_heart(interpolated_trace, 10)
+lung_trace = convert_to_lung(sample_trace, 10)
+heart_trace = convert_to_heart(sample_trace, 10)
 
 import matplotlib.pyplot as plt
 plt.figure(figsize=(12, 6))
@@ -117,6 +117,7 @@ plt.legend()
 plt.subplot(2, 1, 2)
 plt.plot(heart_trace[:400], label='Heart Trace', color='orange')
 plt.title('Heart Trace')
+
 #%% heart and lung qrm files
 
 
@@ -133,13 +134,14 @@ if interpolation_type == 'linear':
     print(f"Trace time points shape: {trace_time_points.shape}")
     print(f"Interp time points shape: {interp_time_points.shape}")
 
-    interpolated_heart = np.interp(interp_time_points, trace_time_points, sample_trace[:,1])
-    interpolated_lung = np.interp(interp_time_points, trace_time_points, sample_trace[:,0])
+    interpolated_heart = np.interp(interp_time_points, trace_time_points, heart_trace[:,1])
+    interpolated_lung = np.interp(interp_time_points, trace_time_points, lung_trace[:,1])
 
     print(f"Interpolated heart trace shape after linear interpolation: {interpolated_heart.shape}")
     print(f"Interpolated lung trace shape after linear interpolation: {interpolated_lung.shape}")
 
 interpolated_heart -= np.mean(interpolated_heart)
+interpolated_lung -= np.mean(interpolated_lung)
 
 print(np.max(interpolated_heart), np.min(interpolated_heart))
 print(f"Range of motion: {np.max(interpolated_heart) - np.min(interpolated_heart):.2f} mm")

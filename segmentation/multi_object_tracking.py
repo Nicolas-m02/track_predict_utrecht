@@ -21,7 +21,7 @@ port_send = 9001
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 sam_mask_threshold = 0.0
 
-sam_type = "large"  
+sam_type = "small"  
 
 if sam_type == "large":
     overwrite_checkpoint = "./sam2.1_hiera_large.pt"
@@ -73,7 +73,7 @@ class ReceiveImages:
         self.frame_no = 0
 
         # Testing params
-        self.break_point = 20  # Set a break point after which to stop receiving images for testing purposes
+        self.break_point = 800  # Set a break point after which to stop receiving images for testing purposes
         
 
         # SAM 2 initialization
@@ -170,6 +170,9 @@ class ReceiveImages:
 
                             _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.prompt)
                             _,_, out_mask_logits2 = self.predictor.add_new_mask(frame_idx=0, obj_id=1, mask=self.prompt2)
+                            _,_, out_mask_logits3 = self.predictor.add_new_mask(frame_idx=0, obj_id=2, mask=self.prompt3)
+                            _,_, out_mask_logits4 = self.predictor.add_new_mask(frame_idx=0, obj_id=3, mask=self.prompt4)
+                            _,_, out_mask_logits5 = self.predictor.add_new_mask(frame_idx=0, obj_id=4, mask=self.prompt5)
 
                             out_mask = out_mask_logits>sam_mask_threshold
 
@@ -233,6 +236,23 @@ class ReceiveImages:
             self.prompt2 = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/data/prompt2.mha"))[0]
             print('Initialized prompt 2')
 
+    def initialize_prompt3(self):
+        if testing:
+            import SimpleITK as sitk
+            self.prompt3 = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/data/prompt3.mha"))[0]
+            print('Initialized prompt 3')
+
+    def initialize_prompt4(self):
+        if testing:
+            import SimpleITK as sitk
+            self.prompt4 = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/data/prompt4.mha"))[0]
+            print('Initialized prompt 4')
+
+    def initialize_prompt5(self):
+        if testing:
+            import SimpleITK as sitk
+            self.prompt5 = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/data/prompt5.mha"))[0]
+            print('Initialized prompt 5')
 
     def save_masks(self, masks, obj_id, save_dir="/utrecht_exp/segmentation/output_masks/"):
         os.makedirs(save_dir, exist_ok=True)
@@ -271,12 +291,15 @@ class ReceiveImages:
             
 
     
-print("Initializing improved tracking module...")
+print("Initializing multi-tracking module...")
 async def main():
     image_receiver = ReceiveImages(send_data=True)
     image_receiver.connect()
     image_receiver.initialize_prompt()
     image_receiver.initialize_prompt2()
+    image_receiver.initialize_prompt3()
+    image_receiver.initialize_prompt4()
+    image_receiver.initialize_prompt5()
     print("Starting tracking...")
     await asyncio.gather(
         image_receiver.receive_images(),
@@ -289,8 +312,12 @@ async def main():
 await main()
 
 #%% visualize results
-
+import numpy as np
+import os
 import SimpleITK as sitk
+import matplotlib.pyplot as plt
+
+
 masks = np.load("/utrecht_exp/segmentation/masks.npy")
 print(f"Loaded masks with shape: {masks.shape}")
 
@@ -304,14 +331,65 @@ from skimage import measure
 
 colors_plot = ['red', 'blue', 'green', 'yellow', 'cyan', 'magenta']
 
-for j in range(masks.shape[1]):
-    print(colors_plot[j])
+
+for frame_idx in range(masks.shape[0]):
+    plt.figure()
+    image_src = sorted(os.listdir('/utrecht_exp/data/test_images/'))[frame_idx]
+    image = sitk.ReadImage('/utrecht_exp/data/test_images/' + image_src)
+    image_array = sitk.GetArrayFromImage(image)[0]
+
+    plt.imshow(image_array, cmap='gray')
+    for j in range(masks.shape[1]):
+        #print(colors_plot[j])
+        
+        mask = masks[frame_idx,j,:,:]
+        #print(mask.shape)
+        contours = measure.find_contours(mask, 0.5)
+        for contour in contours:
+            plt.plot(contour[:, 1], contour[:, 0], linewidth=3,c=colors_plot[j])
+
+    plt.axis('off')
+    plt.savefig(f'/utrecht_exp/segmentation/tmp/frame_{frame_idx:04d}.png')
+    plt.close()
+
+
+#%%
+
+
+def make_gif(input_path,output_path='./newanimation.gif',frame_lim=None,spf=0.1):
+    """Function to make a gif from a folder of images
     
-    mask = masks[0,j,:,:]
-    print(mask.shape)
-    contours = measure.find_contours(mask, 0.5)
-    for contour in contours:
-        plt.plot(contour[:, 1], contour[:, 0], linewidth=3,c=colors_plot[j])
+    Args:
+        input_path (str): path to the folder containing the images
+        output_path (str): path to the folder to save the gif
+        output_name (str): name of the gif
+    """
+    #import natsort
+    import imageio
+        
 
-plt.axis('off')
+    tmp = input_path
+    image_files = [os.path.join(tmp, f) for f in os.listdir(tmp) if f.endswith('.png')]
+    image_files = sorted(image_files)
+    images = []
 
+    if frame_lim is None:
+        frame_lim = len(image_files)
+
+
+    for file in image_files:
+        #print(file)
+        images.append(imageio.imread(file))
+        # Save the images as a GIF
+    imageio.mimsave(output_path, images[:frame_lim], duration=spf)
+    print(f"GIF saved at {output_path}")
+
+    # Remove tmp files 
+    all_files = os.listdir(tmp)
+    for f in all_files:
+        os.remove(os.path.join(tmp,f))
+    print("Temporary files removed")
+    print("GIF created")
+    return None
+
+make_gif(f'/utrecht_exp/segmentation/tmp/')

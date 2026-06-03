@@ -1,83 +1,3 @@
-#%% finding latencies between sending and receiving images in the logs
-
-import os
-import numpy as np
-import datetime
-
-log_gui = '/utrecht_exp/logs/gui_test_log_20260330_141221.txt'
-log_send = '/utrecht_exp/logs/real_time_image_send_log_20260330_141229.txt'
-
-with open(log_gui, 'r') as f:
-    gui_lines = f.readlines()
-
-with open(log_send, 'r') as f:
-    send_lines = f.readlines()
-
-
-print(len(gui_lines))
-print(len(send_lines))
-
-all_latencies = []
-for i in range(len(gui_lines)):
-    gui_line = gui_lines[i]
-    send_line = send_lines[i]
-
-    
-
-    if "Received image" in gui_line and "Sent image" in send_line:
-        t_diff = datetime.datetime.strptime(gui_line.split(' at ')[-1].strip(), '%Y-%m-%d %H:%M:%S.%f') - datetime.datetime.strptime(send_line.split(' at ')[-1].strip(), '%Y-%m-%d %H:%M:%S.%f')
-        print(f"Frame {i+1}: Time difference between send and receive: {t_diff.total_seconds()*1000:.2f} ms")
-
-    all_latencies.append(t_diff.total_seconds()*1000)
-
-
-print(f"Average latency: {np.mean(all_latencies):.2f} ms")
-
-
-#%% End to end test of sending and predicting
-
-prediction_file = '/utrecht_exp/logs/online_log.txt'
-
-send_file = '/utrecht_exp/logs/real_time_image_send_log_20260330_163407.txt'
-
-with open(prediction_file, 'r') as f:
-    pred_lines = f.readlines()
-
-with open(send_file, 'r') as f:
-    send_lines = f.readlines()
-
-
-print(len(pred_lines))
-print(len(send_lines))
-
-# Crop out metadata
-
-pred_lines = pred_lines[2:]
-send_lines = send_lines[102:]
-
-print(len(pred_lines))
-print(len(send_lines))
-
-# prediction_starts at line 100
-
-all_latencies = []
-
-print(pred_lines[0])
-print(send_lines[0])
-import datetime
-for i in range(len(pred_lines)):
-    pred_line = pred_lines[i]
-    send_line = send_lines[i]
-
-    if "Prediction" in pred_line and "Sent image" in send_line:
-        t_diff = datetime.datetime.strptime(pred_line.split(' at ')[-1].strip(), '%Y-%m-%d %H:%M:%S.%f') - datetime.datetime.strptime(send_line.split(' at ')[-1].strip(), '%Y-%m-%d %H:%M:%S.%f')
-        print(f"Frame {i+1}: Time difference between send and prediction: {t_diff.total_seconds()*1000:.2f} ms")
-
-        all_latencies.append(t_diff.total_seconds()*1000)
-
-print(f"Average latency: {np.mean(all_latencies):.2f} ms")
-
-
 #%%
 import matplotlib.pyplot as plt
 import numpy as np
@@ -125,7 +45,7 @@ receive_track_ims = []
 track_receive_coms = []
 receive_predict_coms = []
 
-for i in range(len(im_send_lines)):
+for i in range(len(im_receive_lines)):
     send_line = im_send_lines[i]
     receive_line = im_receive_lines[i]
 
