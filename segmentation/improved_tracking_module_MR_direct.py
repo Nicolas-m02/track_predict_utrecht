@@ -12,8 +12,9 @@ import matplotlib.pyplot as plt
 os.chdir("/utrecht_exp/segmentation/")
 import torch
 
-host_rec = '0.0.0.0' 
-port_rec = 6056
+mrtc_port = 4005 # receiving images from MR
+stack_update_host = 'localhost' # "localhost"?
+stack_update_port = 54323   # controlling the MR
 host_send = 'prediction_container'
 port_send = 9001
 
@@ -60,8 +61,8 @@ class ReceiveImages:
     def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0):
         #self.seen_images = []
         
-        self.zmq_prot = False 
-        self.emulation = True        
+        self.zmq_prot = True
+        self.emulation = False        
         self.emu_path = "/utrecht_data/20260323/340/"
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -101,21 +102,18 @@ class ReceiveImages:
             with open("/utrecht_exp/logs/receive_images_exit.txt", 'w') as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
 
-    def connect(self, host=host_rec, port=port_rec):
+    def connect(self, port=mrtc_port, ctrl_host=stack_update_host, ctrl_port=stack_update_port):
+        import pymri
+        self.handler = pymri.QueuedImageHandler()
+
         if self.zmq_prot and not self.emulation:
-            import zmq
-            self.context = zmq.Context()
-            self.socket = self.context.socket(zmq.SUB)
-            self.socket.bind(f"tcp://{host}:{port}")
-            self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
-            print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
-            self.conn = self.socket
+            print("ZMQ protocol enabled, setting up ZMQ image receiver")
+            self.recv = pymri.MRTCImageReceiver.create(port, ctrl_host, ctrl_port, self.handler, False) 
+            
         elif self.emulation:
             print("Emulation mode enabled, not setting up actual socket connection")
-            import pymri
-            self.handler = pymri.QueuedImageHandler()
             self.recv = pymri.EmuImageReceiver.create(self.emu_path, self.handler)
-
+        """
         else:
             if self.protocol.lower() == 'tcp':
                 self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -133,7 +131,7 @@ class ReceiveImages:
                 self.conn = self.s
                 self.addr = (host, port)
             else:
-                raise ValueError("Protocol must be 'tcp' or 'udp'")
+                raise ValueError("Protocol must be 'tcp' or 'udp'")"""
 
     def connect_send(self, host=host_send, port=port_send):
         if self.send_data:
@@ -153,7 +151,7 @@ class ReceiveImages:
 
 
     async def receive_images(self):
-        if self.zmq_prot:
+        """if self.zmq_prot:
             while True:
 
                 # receive message
@@ -161,41 +159,24 @@ class ReceiveImages:
 
                 # find beginning of binary image data
                 sep = b"DATA\n"
-
                 idx = msg.find(sep)
 
                 if idx == -1:
                     print("no DATA separator found")
-                    continue
-
-                # split header and binary payload
-                
-                
-                header = msg[:idx].decode("latin-1")  # use latin-1 to preserve byte values
-                print(len(header), "bytes of header")
-                print("header:", header)
-                
-
+                    continue                
+                header = msg[:idx].decode("latin-1")  # use latin-1 to preserve byte values                
                 meta = {}
-
                 for line in header.splitlines():
-
                     parts = line.strip().split()
-
                     if len(parts) == 0:
                         continue
-
                     key = parts[0]
-
                     if key == "timestamp":
                         meta["timestamp"] = int(parts[1])
-
                     elif key == "dim":
                         meta["dim"] = [int(x) for x in parts[1:]]
-
                     elif key == "fov":
                         meta["fov"] = [float(x) for x in parts[1:]]
-
                     elif key == "resolution":
                         meta["resolution"] = [float(x) for x in parts[1:]]
 
@@ -208,24 +189,6 @@ class ReceiveImages:
                 print("received bytes with shape", arr.shape)
 
                 img_array = arr.reshape(meta["dim"])
-                """
-                plt.clf()
-                
-                if img_array.ndim == 2:
-                    plt.imshow(img_array, cmap="gray")
-
-                elif img_array.ndim == 3:
-                    # show first slice
-                    plt.imshow(img_array[0], cmap="gray")
-
-                else:
-                    print("unsupported dimensions:", img_array.shape)
-
-                plt.title(f"shape={img_array.shape}")
-                plt.pause(0.001)
-                """
-
-
                 await self.seen_images_queue.put(img_array)
 
                 if self.logging:
@@ -239,6 +202,19 @@ class ReceiveImages:
 
                 image = self.handler.get_image()
 
+                if image is not None:
+                    await self.seen_images_queue.put(image['data'])
+
+                    if self.logging:
+                        with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                            f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
+                await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
+        """
+
+        if  self.zmq_prot or self.emulation:
+            while True:
+
+                image = self.handler.get_image()
                 if image is not None:
                     await self.seen_images_queue.put(image['data'])
 
@@ -280,7 +256,8 @@ class ReceiveImages:
 
                 #print(f"Number of seen images: {len(self.seen_images)}")
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
-                
+
+        
 
     async def preprocess_image(self):
         while True:
@@ -372,7 +349,7 @@ print("Initializing improved tracking module...")
 async def main():
     image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128))
     image_receiver.initialize_prompt()
-    image_receiver.connect(host=host_rec, port=port_rec)
+    image_receiver.connect(port=mrtc_port, ctrl_host=stack_update_host, ctrl_port=stack_update_port)
     image_receiver.connect_send(host=host_send, port=port_send)
     print("Starting tracking...")
     await asyncio.gather(
