@@ -16,8 +16,10 @@ lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
 
 from socket_model import LSTM
 
-device = torch.device('cuda:1' if torch.cuda.is_available() and torch.cuda.device_count() > 1 else 'cpu')
-    
+# device = torch.device('cuda:1' if torch.cuda.is_available() and torch.cuda.device_count() > 1 else 'cpu')
+
+device = torch.device("cuda:0")
+
 def better_manual_scaler(input_data,scale_range,backward=False):
     try:
         data = np.array(input_data.cpu())
@@ -103,8 +105,11 @@ class predictor:
 
         print('Intialized LSTM model.')
 
-        
-            
+        print(f'Device: {torch.cuda.get_device_name()}')
+        print(f'Cuda version: {torch.version.cuda}')
+        print(torch.cuda.is_available())
+        print(torch.cuda.device_count())
+
         self.current_data_point = 0
         self.current_prediction_point = 0
 
@@ -115,7 +120,7 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
-        self.logging = False
+        self.logging = True
         self.first_data_point_received = False
 
         # Params for GUI
@@ -269,7 +274,7 @@ class predictor:
                     if output is not None:
                         self.prediction_queue.put_nowait(output)
                     
-                        print("Queue size:", self.prediction_queue.qsize())
+                        #print("Queue size:", self.prediction_queue.qsize())
             
                 await asyncio.sleep(0.001) 
                 
@@ -333,14 +338,12 @@ async def main():
 # run concurrent script
 import asyncio
 
-await main()
+asyncio.run(main())
 
 # aysncio.run(main())
 
 # %%
 
 
-import torch
-torch.cuda.is_available()
-torch.cuda.device_count()
+
 
