@@ -7,7 +7,7 @@ SimpleITK
 numpy<2.0
 # for cuda 11.8
 --extra-index-url https://download.pytorch.org/whl/cu118
-torch
+torch==2.10.0
 pandas
 pyarrow
 matplotlib
