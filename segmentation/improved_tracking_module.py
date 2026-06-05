@@ -9,6 +9,7 @@ import time
 import cv2
 import asyncio
 import matplotlib.pyplot as plt
+import math
 os.chdir("/utrecht_exp/segmentation/")
 import torch
 
@@ -36,7 +37,7 @@ elif sam_type == "tiny":
 
 from sam2.build_sam import build_sam2_camera_predictor
 
-testing = True
+testing = False
 
 from scipy.ndimage import center_of_mass
 
@@ -57,13 +58,13 @@ def torch_center_of_mass(mask):
 class ReceiveImages:
     # Init functions to set up queues, SAM, connections
 
-    def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0):
+    def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0,send_timestamps=False):
         #self.seen_images = []
         
-        self.zmq_prot = True 
+        self.zmq_prot = False 
         # Receiving data params
-        self.emulation = False
-        self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
+        self.emulation = True
+        self.emu_path = "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -71,12 +72,15 @@ class ReceiveImages:
         self.masks_queue = asyncio.Queue(maxsize=max_queue_size)
         self.coms_queue = asyncio.Queue(maxsize=max_queue_size)
         
+        self.prompt_library = {}
+        self.current_angle = None
+        self.last_angle = None
 
         self.prompt = None
         self.time_taken_per_frame = []
         self.image_dimensions = image_dimensions
         self.send_data = send_data
-
+        self.send_timestamps = send_timestamps
         self.protocol = protocol
 
         self.frame_no = 0
@@ -199,13 +203,13 @@ class ReceiveImages:
                     elif key == "resolution":
                         meta["resolution"] = [float(x) for x in parts[1:]]
 
-                print("received image")
-                print(meta)
+                #print("received image")
+                #print(meta)
                 
                 raw = msg[idx + len(sep):]
 
                 arr = np.frombuffer(raw, dtype=np.float32)
-                print("received bytes with shape", arr.shape)
+                #print("received bytes with shape", arr.shape)
 
                 img_array = arr.reshape(meta["dim"])
                 """
@@ -271,7 +275,13 @@ class ReceiveImages:
                 image = self.handler.get_image()
 
                 if image is not None:
-                    await self.seen_images_queue.put(image['data'])
+                    self.current_angle = int(np.round(math.degrees(math.atan2(image['row_direction_cosines'][1], image['row_direction_cosines'][0]))))
+                    #print(image['row_direction_cosines'])
+                    #print(f"Row direction cosine: {math.degrees(math.atan2(image['row_direction_cosines'][1], image['row_direction_cosines'][0])):.2f}")
+                    if self.send_timestamps:
+                        await self.seen_images_queue.put((image['data'], image['timestamp']))
+                    else:
+                        await self.seen_images_queue.put(image['data'])
 
                     if self.logging:
                         with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
@@ -283,62 +293,114 @@ class ReceiveImages:
 
     async def preprocess_image(self):
         while True:
-            image = await self.seen_images_queue.get()
+            if self.send_timestamps:
+                image, timestamp = await self.seen_images_queue.get()
+            else:
+                image = await self.seen_images_queue.get()
             
+
             prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-            self.preprocessed_images_queue.put_nowait(prep_image)
+            
+            if self.send_timestamps:
+                self.preprocessed_images_queue.put_nowait((prep_image, timestamp))
+            else:
+                self.preprocessed_images_queue.put_nowait(prep_image)
             #return prep_image
 
     async def track_frame(self):
         while True: 
-            image = await self.preprocessed_images_queue.get()
+            if self.send_timestamps:
+                image, timestamp = await self.preprocessed_images_queue.get()
+            else:
+                image = await self.preprocessed_images_queue.get()
             self.frame_no += 1
+
             with torch.inference_mode():
                     with torch.autocast('cuda', dtype=self.downcast_dtype):
                         
-                        if self.frame_no == 1: 
-                            print(f"Initializing SAM {sam_type} with the first frame and prompt")
+                        if self.frame_no == 1 or self.current_angle != self.last_angle: 
+                            if self.frame_no == 1:
+                                print(f"Initializing SAM {sam_type} with the first frame and prompt")
 
+                            else: 
+                                print(f"Angle change detected (current: {self.current_angle}, last: {self.last_angle}), reinitializing SAM {sam_type} with new prompt")
                             start_time_sam = time.time()
 
                             self.predictor.load_first_frame(image)
 
-                            _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.prompt)
+                            if testing:
+                                _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.prompt)
+
+                            else: 
+                                # Find mask with specified angle 
+                                #print(self.prompt_library.keys())
+                                #print(self.prompt_library[str(self.current_angle)].shape)
+                                _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.current_angle)])
+                                self.last_angle = self.current_angle
+
+
 
                             out_mask = out_mask_logits>sam_mask_threshold
 
-                            self.masks_queue.put_nowait(out_mask)
+                            if self.send_timestamps:
+                                self.masks_queue.put_nowait((out_mask, timestamp))
+                            else:
+                                self.masks_queue.put_nowait(out_mask)
                         
                             print("First frame processed, starting tracking...")
                             end_time_sam = time.time()
                             print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
 
                         else:
-                            print("Tracking new frame...")
+                            #print("Tracking new frame...")
                             _, out_mask_logits = self.predictor.track(image)
                             out_mask = out_mask_logits>sam_mask_threshold
-                            self.masks_queue.put_nowait(out_mask)
+                            if self.send_timestamps:
+                                self.masks_queue.put_nowait((out_mask, timestamp))
+                            else:
+                                self.masks_queue.put_nowait(out_mask)
 
 
     async def postprocess_mask(self):
         while True: 
-            new_mask = await self.masks_queue.get()            #print("Calculating COM from mask...")
+            
+            if self.send_timestamps:
+                new_mask, timestamp = await self.masks_queue.get()
+            else:
+                new_mask = await self.masks_queue.get()
 
             new_com = torch_center_of_mass(new_mask)
-            self.coms_queue.put_nowait(new_com)
+            
+            if self.send_timestamps:
+                self.coms_queue.put_nowait((new_com, timestamp))
+            else:
+                self.coms_queue.put_nowait(new_com)
             #print(f"New COM: {new_com}")
             await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
     async def send_com(self):
         if self.send_data:
             while True:
-                new_com = await self.coms_queue.get()
+                if self.send_timestamps:
+                    new_com, tstamp_send = await self.coms_queue.get()
+                else:
+                    new_com = await self.coms_queue.get()
+
+
                 if self.send_data:
                     if self.frame_no == 1:
                         print(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}")
-                        value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
+                        if self.send_timestamps:
+                            #print(f"Timestamp sent: {tstamp_send/1e9} seconds")
+                            value = struct.pack('2fQ', new_com[0], new_com[1], tstamp_send)  # Convert the float and timestamp to bytes
+                        else:
+                            value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
                     else:
-                        value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
+                        if self.send_timestamps:
+                            #print(f"Timestamp sent: {tstamp_send/1e9} seconds")
+                            value = struct.pack('2fQ', new_com[0], new_com[1], tstamp_send)  # Convert the float and timestamp to bytes
+                        else:
+                            value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
                     self.send_socket.send(value)
 
                     if self.logging:
@@ -347,11 +409,27 @@ class ReceiveImages:
 
     # One time use functions
 
-    def initialize_prompt(self):
+    def initialize_prompt(self, prompt_library_path=None):
         if testing:
             import SimpleITK as sitk
             self.prompt = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/data/prompt.mha"))[0]
             print('Initialized prompt')
+
+        elif prompt_library_path is not None:
+            import SimpleITK as sitk
+            for file in os.listdir(prompt_library_path):
+                if file.endswith(".mha"):
+                    #print(file.split(".")[0].split("_")[-1])
+                    prompt = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(prompt_library_path, file)))[0]
+                    #print(prompt.shape)
+
+                    self.prompt_library[file.split(".")[0].split("_")[-1]] = prompt
+
+                    #print(f"Initialized prompt from {file}")
+                    
+            print(f"Initialized {len(self.prompt_library)} prompts from library")
+
+
 
     def close_connection(self):
         self.conn.close()
@@ -369,8 +447,8 @@ class ReceiveImages:
     
 print("Initializing improved tracking module...")
 async def main():
-    image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128))
-    image_receiver.initialize_prompt()
+    image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128),send_timestamps=True)
+    image_receiver.initialize_prompt(prompt_library_path="/utrecht_exp/segmentation/prompt_library/prompts_circle/")
     image_receiver.connect_send(host=host_send, port=port_send)
     image_receiver.connect(host=host_rec, port=port_rec)
 

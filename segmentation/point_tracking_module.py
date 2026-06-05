@@ -15,7 +15,7 @@ import torch
 host_rec = 'localhost' 
 port_rec = 1220
 host_send = 'utrecht_prediction_01'
-port_send = 9001
+port_send = 9002
 
 host_gui = 'utrecht_gui_02'
 port_gui = 7000

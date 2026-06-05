@@ -127,10 +127,7 @@ class predictor:
 
         self.logging = True
         self.first_data_point_received = False
-        self.first_prediction_performed = False
-        # Params for GUI
-        self.interpolation_point = 2.5 # latency ms/4 * Frequency ms
-        self.prediction_queue = asyncio.Queue()
+
 
         # Params for sending predictions
         self.send_frequency = send_frequency
@@ -275,7 +272,6 @@ class predictor:
 
                     output = undo_sliding_window_norm(output.cpu().numpy(),orig_scale,dimension=2)
                     if output is not None:
-                        self.first_prediction_performed = True
                         if self.receive_timestamps:
                             with self.prediction_lock:
                                 self.latest_prediction = output.copy()
