@@ -183,7 +183,7 @@ class predictor:
             self.send_port = port_send
             import zmq
             self.context = zmq.Context()
-            self.socket = self.context.socket(zmq.PUB)
+            self.socket = self.context.socket(zmq.REP)
             self.socket.bind(f"tcp://{host}:{port}")
             print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
             self.conn_send = self.socket
