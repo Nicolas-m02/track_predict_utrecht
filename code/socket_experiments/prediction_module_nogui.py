@@ -126,6 +126,7 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
+        self.no_prediction = True
         self.logging = True
         self.first_data_point_received = False
 
@@ -168,6 +169,10 @@ class predictor:
 
             with open('/utrecht_exp/logs/online_received.txt', 'w') as f:
                 f.write('Online received data log\n')
+                f.write('=======================\n')
+
+            with open('/utrecht_exp/pred_log_file.txt', 'w') as f:
+                f.write('Predictions \n')
                 f.write('=======================\n')
 
     def connect(self,host=host, port=port): # receiver
@@ -278,11 +283,18 @@ class predictor:
                     if output is not None:
                         if self.receive_timestamps:
                             with self.prediction_lock:
-                                self.latest_prediction = output.copy()
-                                self.latest_timestamp = timestamp
+                                if self.no_prediction:
+                                    self.latest_prediction = data[-1,:].cpu().numpy().copy()
+                                else:
+                                    self.latest_prediction = output.copy()
+                                    self.latest_timestamp = timestamp
+                                
                         else:
                             with self.prediction_lock:
-                                self.latest_prediction = output.copy()                        
+                                if self.no_prediction:
+                                    self.latest_prediction = data[-1,:].cpu().numpy().copy()
+                                else:
+                                    self.latest_prediction = output.copy()                        
                         self.current_prediction_point += 1
 
                         if self.logging:
@@ -327,11 +339,14 @@ class predictor:
                 pass
 
     def interpolate_prediction(self, prediction,interpolation_point):
-        # prediction is shape (4,2)
-        new_prediction = np.zeros(3)
-        new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])     ########### 1?
-        new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])     ########### 0?
-        new_prediction[2] = 64
+        # prediction is shape (4,2), no prediction is shape (2,)
+        if self.no_prediction:
+            return prediction
+        else:
+            new_prediction = np.zeros(3)
+            new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])     ########### 1?
+            new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])     ########### 0?
+            new_prediction[2] = 64
         return new_prediction
 
     # async def send_prediction_loop(self):
@@ -456,11 +471,7 @@ class predictor:
 
             # Convert positions from pixel space to real space
             # MLC takes center of the image as (0,0)
-
             interpolated_prediction = (interpolated_prediction-64)*1.95 #mm
-
-
-
 
             # create and send message
             vec = ps.Vector()
@@ -479,6 +490,9 @@ class predictor:
             env.message_type = ps.Envelope.LETTER_REP
             self.conn_send.send(env.SerializeToString())
 
+            if self.logging:
+                with open('/utrecht_exp/pred_log_file.txt', 'a') as f:
+                    f.write(f"Sent prediction: {interpolated_prediction} at {datetime.datetime.now()}\n")
 
             next_time += period
             sleep_time = next_time - time.perf_counter()
