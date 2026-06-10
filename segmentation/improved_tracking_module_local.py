@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 os.chdir("/utrecht_exp/segmentation/")
 import torch
 
-host_rec = 'localhost' 
+host_rec = '0.0.0.0' 
 port_rec = 6056
 host_send = 'prediction_container'
 port_send = 9001
@@ -21,7 +21,7 @@ port_send = 9001
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 sam_mask_threshold = 0.0
 
-sam_type = "large"  
+sam_type = "tiny"  
 
 if sam_type == "large":
     overwrite_checkpoint = "./sam2.1_hiera_large.pt"
@@ -60,10 +60,10 @@ class ReceiveImages:
     def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0):
         #self.seen_images = []
 
-        self.emulation = False
-        self.emu_path = '/utrecht_data/20260323/dat_all_angles/'
+        self.emulation = True
+        self.emu_path = '/utrecht_data/20260323/tmp/'
 
-        self.zmq_prot = True
+        self.zmq_prot = False
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -134,6 +134,8 @@ class ReceiveImages:
                 print("Emulation mode: not setting up actual socket connection, will read images from disk instead")
                 import pymri
 
+                print(len(os.listdir(self.emu_path)))
+
                 self.handler = pymri.QueuedImageHandler()
                 self.recv = pymri.EmuImageReceiver.create(self.emu_path, self.handler)
 
@@ -160,15 +162,12 @@ class ReceiveImages:
         if self.zmq_prot:
             print("Running with ZMQ")
             while True:
-                print("test")
                 # receive message
                 msg = self.conn.recv()
-                print("got message")
                 # find beginning of binary image data
                 sep = b"DATA\n"
 
                 idx = msg.find(sep)
-                print('found idx')
                 if idx == -1:
                     print("no DATA separator found")
                     continue
@@ -178,7 +177,6 @@ class ReceiveImages:
                 
                 header = msg[:idx].decode("latin-1")  # use latin-1 to preserve byte values
                 #print(len(header), "bytes of header")
-                print("header:", header)
                 
 
                 meta = {}
@@ -204,14 +202,16 @@ class ReceiveImages:
                     elif key == "resolution":
                         meta["resolution"] = [float(x) for x in parts[1:]]
 
-                print("received image")
-                print(meta)
                 
                 raw = msg[idx + len(sep):]
 
                 arr = np.frombuffer(raw, dtype=np.float32)
                 print("received bytes with shape", arr.shape)
-
+                
+                # skip this frame if size doesn't match expected dimensions
+                if arr.size != np.prod(meta["dim"]):
+                    print(f"Warning: expected {np.prod(meta['dim'])} elements based on header, but got {arr.size}")
+                    continue
                 img_array = arr.reshape(meta["dim"])
 
 
@@ -353,7 +353,7 @@ class ReceiveImages:
             plt.savefig(os.path.join(save_dir, f"mask_{idx:03d}.png"), bbox_inches='tight', pad_inches=0)
             plt.close()
 
-    
+
 print("Initializing improved tracking module...")
 async def main():
     image_receiver = ReceiveImages(send_data=True)

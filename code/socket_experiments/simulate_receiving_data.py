@@ -15,13 +15,15 @@ class DataReceiver:
         self.host = host
         self.port = port
         self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.SUB)
+        self.socket = self.context.socket(zmq.REQ)
         self.socket.connect(f"tcp://{self.host}:{self.port}")
-        self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
+        #self.socket.setsockopt_string(zmq.SUBSCRIBE)
         print(f"DataReceiver connected to at {self.host}:{self.port}...")
 
     async def receive_data(self):
         while True:
+            
+            self.socket.send_string("Requesting data")
             data = self.socket.recv()
             value1, value2 = np.frombuffer(data, dtype=np.float32)
             print(f"Received data: {value1}, {value2}")
@@ -30,7 +32,7 @@ class DataReceiver:
             with open(log_file, "a") as f:
                 f.write(f"{time.time()},{value1},{value2}\n")
 
-            await asyncio.sleep(0.0001)  # Simulate processing time
+            await asyncio.sleep(0.05)  # Simulate processing time
 
 async def main():
     receiver = DataReceiver()

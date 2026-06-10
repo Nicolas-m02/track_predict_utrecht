@@ -8,6 +8,7 @@ import torch.nn as nn
 import struct
 import numpy as np
 import datetime
+import PositionServer_pb2 as ps
 
 host = "0.0.0.0"
 port = 9002  
@@ -135,6 +136,7 @@ class predictor:
 
         self.latest_prediction = None
         self.latest_timestamp = None
+        self.lookahead_time = 250 #ms
         self.prediction_lock = threading.Lock()
        
 
@@ -186,6 +188,8 @@ class predictor:
             self.socket = self.context.socket(zmq.REP)
             self.socket.bind(f"tcp://{host}:{port}")
             print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
+            print(self.socket.getsockopt(zmq.LAST_ENDPOINT))
+            
             self.conn_send = self.socket
 
     async def receive_data(self):
@@ -316,7 +320,7 @@ class predictor:
                 # crop out last point
                 self.online_batched_data = self.online_batched_data[1:,:,:]
                 end_time = time.time()
-                print(f"Online optimization took {end_time - start_time:.4f} seconds.")
+                #print(f"Online optimization took {end_time - start_time:.4f} seconds.")
                 self.current_optimization_point += 1
             
             else:
@@ -324,9 +328,10 @@ class predictor:
 
     def interpolate_prediction(self, prediction,interpolation_point):
         # prediction is shape (4,2)
-        new_prediction = np.zeros((1,2))
-        new_prediction[:,0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])
-        new_prediction[:,1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])
+        new_prediction = np.zeros(3)
+        new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])     ########### 1?
+        new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])     ########### 0?
+        new_prediction[2] = 64
         return new_prediction
 
     # async def send_prediction_loop(self):
@@ -410,31 +415,70 @@ class predictor:
         next_time = time.perf_counter()
 
         while True:
+            print("Waiting for message from tracking module...")
+            msg = self.conn_send.recv()
+            print(f"Received message: {msg}")
 
             with self.prediction_lock:
                 prediction = self.latest_prediction
                 timestamp = self.latest_timestamp
 
-            if prediction is not None:
+            if prediction is None:
+                # sending zeros until we have a prediction
+                vec = ps.Vector()
+                vec.x = 0.0
+                vec.y = 0.0
+                vec.z = 0.0
 
-                latency = (
-                    datetime.datetime.now().timestamp()
-                    - timestamp / 1e9
-                )
+                print(datetime.datetime.now(),' replying x y z ',vec.x,' ',vec.y,' ',vec.z)
+                rep = ps.LetterRep()
+                rep.payload = vec.SerializeToString()
+                rep.message_type = ps.Letter.POSITION_VECTOR
+                env = ps.Envelope()
+                env.payload = rep.SerializeToString()
+                env.message_type = ps.Envelope.LETTER_REP
+                self.conn_send.send(env.SerializeToString())
+                continue
 
-                interpolation_point = latency / 90
+            latency = (
+                datetime.datetime.now().timestamp()
+                - timestamp / 1e9 + self.lookahead_time/1000
+            )
+            print(f"Latency: {latency:.4f} seconds")
+            interpolation_point = latency*1000 / 100
+            print(f"Interpolation point: {interpolation_point:.4f}")
+            if interpolation_point > 4:
+                print("Interpolation point is greater than 4. Taking last predicion.")    
+            interpolated_prediction = self.interpolate_prediction(
+                prediction,
+                interpolation_point,
+            )
 
-                interpolated_prediction = self.interpolate_prediction(
-                    prediction,
-                    interpolation_point,
-                )
+            # Convert positions from pixel space to real space
+            # MLC takes center of the image as (0,0)
 
-                self.conn_send.send(
-                    struct.pack(
-                        "2f",
-                        *interpolated_prediction.flatten()
-                    )
-                )
+            interpolated_prediction = (interpolated_prediction-64)*1.95 #mm
+
+
+
+
+            # create and send message
+            vec = ps.Vector()
+            arr = np.asarray(interpolated_prediction).reshape(-1)
+
+            vec.x = float(arr[0])
+            vec.y = float(arr[1])
+            vec.z = float(arr[2])
+
+            print(datetime.datetime.now(),' replying x y z ',vec.x,' ',vec.y,' ',vec.z)
+            rep = ps.LetterRep()
+            rep.payload = vec.SerializeToString()
+            rep.message_type = ps.Letter.POSITION_VECTOR
+            env = ps.Envelope()
+            env.payload = rep.SerializeToString()
+            env.message_type = ps.Envelope.LETTER_REP
+            self.conn_send.send(env.SerializeToString())
+
 
             next_time += period
             sleep_time = next_time - time.perf_counter()

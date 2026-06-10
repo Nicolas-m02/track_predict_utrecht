@@ -10,7 +10,7 @@ import SimpleITK as sitk
 import pymri
 import time
 
-emu_path = "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
+emu_path = "/utrecht_data/20260323/tmp/"
 
 handler = pymri.QueuedImageHandler()
 recv = pymri.EmuImageReceiver.create(emu_path, handler)
@@ -46,7 +46,7 @@ print(np.unique(all_cosines))
 
 known_angles = []  
 
-os.makedirs("/utrecht_exp/segmentation/prompt_library", exist_ok=True)
+os.makedirs("/utrecht_exp/segmentation/prompt_library/tmp_frontaal", exist_ok=True)
 
 for i in range(len(all_cosines)):
     if all_cosines[i] not in known_angles:
@@ -59,7 +59,7 @@ for i in range(len(all_cosines)):
         plt.show()
         print(image.shape)
 
-        #sitk.WriteImage(sitk.GetImageFromArray(image), f"/utrecht_exp/segmentation/prompt_library/image_{all_cosines[i]}.mha")
+        sitk.WriteImage(sitk.GetImageFromArray(image), f"/utrecht_exp/segmentation/prompt_library/tmp_frontaal/image_{all_cosines[i]}.mha")
 
 
         known_angles.append(all_cosines[i])

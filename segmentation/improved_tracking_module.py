@@ -16,7 +16,14 @@ import torch
 host_rec = '0.0.0.0' 
 port_rec = 6056
 host_send = 'prediction_container'
-port_send = 9001
+port_send = 9002
+
+
+mrtc_port = 4005 # receiving images from MR
+stack_update_host = 'localhost'
+stack_update_port = 54323   # controlling the MR
+
+
 
 # SAM2 Configs
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -62,9 +69,9 @@ class ReceiveImages:
         #self.seen_images = []
         
 
-        self.zmq_prot = False 
+        self.zmq_prot = True
         self.emulation = True        
-        self.emu_path = "/utrecht_data/20260323/340/"
+        self.emu_path = "/utrecht_data/20260323/tmp/"
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -74,7 +81,7 @@ class ReceiveImages:
         
         self.prompt_library = {}
         self.current_angle = None
-        self.last_angle = None
+        self.last_angle = 0
 
         self.prompt = None
         self.time_taken_per_frame = []
@@ -82,6 +89,12 @@ class ReceiveImages:
         self.send_data = send_data
         self.send_timestamps = send_timestamps
         self.protocol = protocol
+
+        self.MRTC_prot = True
+        self.mrtc_port = mrtc_port 
+        self.stack_update_host = stack_update_host
+        self.stack_update_port = stack_update_port   
+
 
         self.frame_no = 0
 
@@ -116,6 +129,13 @@ class ReceiveImages:
             self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
             print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
             self.conn = self.socket
+
+        if self.zmq_prot and self.MRTC_prot and not self.emulation:
+            import pymri
+            self.handler = pymri.QueuedImageHandler()
+            print("ZMQ protocol enabled, setting up ZMQ image receiver")
+            self.recv = pymri.MRTCImageReceiver.create(self.mrtc_port, self.stack_update_host, self.stack_update_port, self.handler, False) 
+            
         elif self.emulation:
             print("Emulation mode enabled, not setting up actual socket connection")
             import pymri
@@ -148,7 +168,7 @@ class ReceiveImages:
                 self.send_socket.connect((host, port))
             elif self.protocol.lower() == 'udp':
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                self.send_socket.connect((host, port))
+                self.send_socket.bind((host, port))
             else:
                 raise ValueError("Protocol must be 'tcp' or 'udp'")
             print(f"Connected to server at {host}:{port} for sending data, using protocol {self.protocol.lower()}")
@@ -159,7 +179,7 @@ class ReceiveImages:
 
 
     async def receive_images(self):
-        if self.zmq_prot:
+        if self.zmq_prot and not self.MRTC_prot:
             while True:
 
                 # receive message
@@ -178,8 +198,11 @@ class ReceiveImages:
                 
                 
                 header = msg[:idx].decode("latin-1")  # use latin-1 to preserve byte values
-                print(len(header), "bytes of header")
-                print("header:", header)
+                #print(len(header), "bytes of header")
+                #print("header:", header)
+                if header.count("\n") < 3:
+                    print("header does not contain enough lines, skipping message")
+                    continue
                 
 
                 meta = {}
@@ -192,26 +215,23 @@ class ReceiveImages:
                         continue
 
                     key = parts[0]
-
-                    if key == "timestamp":
+                    #print("key:", key)
+                    if "timestamp" in key:
                         meta["timestamp"] = int(parts[1])
-
                     elif key == "dim":
                         meta["dim"] = [int(x) for x in parts[1:]]
-
                     elif key == "fov":
                         meta["fov"] = [float(x) for x in parts[1:]]
-
                     elif key == "resolution":
                         meta["resolution"] = [float(x) for x in parts[1:]]
-
-                #print("received image")
-                #print(meta)
-                
+                    elif key == "row_direction_cosines":
+                        meta["row_direction_cosines"] = [float(x) for x in parts[1:]]
+                        self.current_angle = int(np.round(math.degrees(math.atan2(meta["row_direction_cosines"][1], meta["row_direction_cosines"][0]))))
+                        print(f"Current angle: {self.current_angle}")
                 raw = msg[idx + len(sep):]
 
                 arr = np.frombuffer(raw, dtype=np.float32)
-                #print("received bytes with shape", arr.shape)
+                print("received bytes with shape", arr.shape)
 
                 img_array = arr.reshape(meta["dim"])
                 """
@@ -231,8 +251,10 @@ class ReceiveImages:
                 plt.pause(0.001)
                 """
 
-
-                await self.seen_images_queue.put(img_array)
+                if self.send_timestamps:
+                    await self.seen_images_queue.put((img_array, meta["timestamp"]))
+                else:
+                    await self.seen_images_queue.put(img_array)
 
                 if self.logging:
                     with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
@@ -240,14 +262,18 @@ class ReceiveImages:
 
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
 
-        elif self.emulation:
+        elif self.emulation or (self.zmq_prot and self.MRTC_prot):
             while True:
 
                 image = self.handler.get_image()
 
                 if image is not None:
-                    await self.seen_images_queue.put(image['data'])
 
+                    if self.send_timestamps:
+                        await self.seen_images_queue.put((image['data'], image['timestamp']))
+                    else:
+                        await self.seen_images_queue.put(image['data'])
+                    print(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}")
                     if self.logging:
                         with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
                             f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
@@ -332,7 +358,14 @@ class ReceiveImages:
                                 # Find mask with specified angle 
                                 #print(self.prompt_library.keys())
                                 #print(self.prompt_library[str(self.current_angle)].shape)
-                                _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.current_angle)])
+                                if str(self.current_angle) not in self.prompt_library:
+                                    print(self.prompt_library.keys())
+                                    print(f"Current angle: {self.current_angle}")
+                                    print(f"Last angle: {self.last_angle}")
+                                    print(f"No prompt found for angle {self.current_angle}, using default prompt")
+                                    _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.last_angle)])
+                                else:
+                                    _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.current_angle)])
                                 self.last_angle = self.current_angle
 
 
@@ -423,7 +456,7 @@ class ReceiveImages:
                     self.prompt_library[file.split(".")[0].split("_")[-1]] = prompt
 
                     #print(f"Initialized prompt from {file}")
-                    
+            print(self.prompt_library.keys())
             print(f"Initialized {len(self.prompt_library)} prompts from library")
 
 
