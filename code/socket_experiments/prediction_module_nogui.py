@@ -415,9 +415,9 @@ class predictor:
         next_time = time.perf_counter()
 
         while True:
-            print("Waiting for message from tracking module...")
+            #print("Waiting for message from tracking module...")
             msg = self.conn_send.recv()
-            print(f"Received message: {msg}")
+            #print(f"Received message: {msg}")
 
             with self.prediction_lock:
                 prediction = self.latest_prediction
@@ -430,7 +430,7 @@ class predictor:
                 vec.y = 0.0
                 vec.z = 0.0
 
-                print(datetime.datetime.now(),' replying x y z ',vec.x,' ',vec.y,' ',vec.z)
+                print(datetime.datetime.now(),' x y z ',vec.x,' ',vec.y,' ',vec.z)
                 rep = ps.LetterRep()
                 rep.payload = vec.SerializeToString()
                 rep.message_type = ps.Letter.POSITION_VECTOR
