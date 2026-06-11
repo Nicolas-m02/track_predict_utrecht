@@ -1,5 +1,6 @@
 #%%
 import os
+import sys
 import threading
 import asyncio
 import socket
@@ -14,16 +15,16 @@ host = "0.0.0.0"
 port = 9002  
 testing = False
 
-host_send = "0.0.0.0"
+host_send = '0.0.0.0'
 port_send = 9003
 
 lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
 os.chdir('/utrecht_exp/code/socket_experiments')
 from socket_model import LSTM
 
-# device = torch.device('cuda:1' if torch.cuda.is_available() and torch.cuda.device_count() > 1 else 'cpu')
 
 device = torch.device("cuda:0")
+print(device)
 
 def better_manual_scaler(input_data,scale_range,backward=False):
     try:
@@ -96,9 +97,7 @@ class predictor:
 
         self.seen_data = torch.zeros((0,self.input_dim)).float().to(device)
         self.received_first_data_point = False
-        self.stopping_point = 850
 
-        self.prediction_history = []
         self.true_history = []
 
         # initialize LSTM model
@@ -126,20 +125,25 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
-        self.no_prediction = True
+        self.no_prediction = False
         self.logging = True
         self.first_data_point_received = False
 
-
+        # Scaling params
+        self.img_grid_mm = 1.95  # mm
+        self.img_size_px = 128   # px
+        self.img_frequency = 10  # Hz
         # Params for sending predictions
         self.send_frequency = send_frequency
         import threading
 
         self.latest_prediction = None
-        self.latest_timestamp = None
+        self.previous_prediction = None
+        self.latest_timestamp_recv_mri = None
+        self.previous_timestamp_recv_mri = None
         self.lookahead_time = 250 #ms
         self.prediction_lock = threading.Lock()
-       
+
 
         # LSTM Startup
         for i in range(3):
@@ -208,7 +212,8 @@ class predictor:
                     while len(buf) < SIZE:
                         chunk = self.conn.recv(SIZE - len(buf))
                         if not chunk:
-                            raise ConnectionError("socket closed")
+                            print("socket closed")
+                            sys.exit()
                         buf += chunk
 
                     x, y, timestamp_ns = struct.unpack('2fQ', buf)
@@ -235,7 +240,7 @@ class predictor:
                 return [0]
             else:
                 if self.receive_timestamps:
-                    data, timestamp = await self.new_data_queue.get()
+                    data, timestamp_recv_mri = await self.new_data_queue.get()
                     
                 else:
                     data = await self.new_data_queue.get()
@@ -284,16 +289,21 @@ class predictor:
                         if self.receive_timestamps:
                             with self.prediction_lock:
                                 if self.no_prediction:
+                                    self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = data[-1,:].cpu().numpy().copy()
                                 else:
+                                    self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()
-                                    self.latest_timestamp = timestamp
+                                    self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
+                                    self.latest_timestamp_recv_mri = timestamp_recv_mri
                                 
                         else:
                             with self.prediction_lock:
                                 if self.no_prediction:
+                                    self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = data[-1,:].cpu().numpy().copy()
                                 else:
+                                    self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()                        
                         self.current_prediction_point += 1
 
@@ -310,17 +320,15 @@ class predictor:
     async def optimize_online(self):
 
         while True:
-            await asyncio.sleep(0.005)
+            await asyncio.sleep(0.001)
 
             if self.current_prediction_point > self.current_optimization_point and len(self.online_batched_data) >= self.online_batch_size:
-                start_time = time.time()
+                #start_time = time.time()
                 
                 # Splitting into input and target            
                 self.online_input = self.online_batched_data[:,-self.input_size:-self.output_size,:].unsqueeze(0)
                 self.online_target = self.online_batched_data[:,-self.output_size:,:].unsqueeze(0)
 
-                # print(self.online_input[0,:,:].shape)
-                # print(self.online_target.squeeze(0).shape)
                 self.lstm_model.train()
                 for epoch in range(self.online_epochs):
                     self.optimizer.zero_grad()
@@ -331,7 +339,7 @@ class predictor:
                 
                 # crop out last point
                 self.online_batched_data = self.online_batched_data[1:,:,:]
-                end_time = time.time()
+                #end_time = time.time()
                 #print(f"Online optimization took {end_time - start_time:.4f} seconds.")
                 self.current_optimization_point += 1
             
@@ -344,79 +352,10 @@ class predictor:
             return prediction
         else:
             new_prediction = np.zeros(3)
-            new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])     ########### 1?
-            new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])     ########### 0?
-            new_prediction[2] = 64
+            new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])
+            new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])  
+            new_prediction[2] = self.img_size_px/2
         return new_prediction
-
-    # async def send_prediction_loop(self):
-    #     if self.send_frequency is not None:
-    #         print(f"Starting to send interpolated predictions at {self.send_frequency} Hz to {self.send_host}:{self.send_port}...")
-    #         while True:
-    #             if self.first_prediction_performed == False:
-    #                 await asyncio.sleep(0.001)
-    #                 continue
-    #             if self.prediction_queue.qsize() > 0:
-    #                 if self.receive_timestamps:
-    #                     prediction, timestamp = await self.prediction_queue.get()
-    #                     print(f"Got prediction from queue with timestamp {timestamp}: {prediction}")
-    #                 else:
-    #                     prediction = await self.prediction_queue.get()
-    #                     print(f"Got prediction from queue: {prediction}")
-            
-    #             # Convert timestamp to interpolation point
-    #             latency = (datetime.datetime.now().timestamp() - timestamp/1e9)
-    #             #print(f"Latency: {latency:.4f} seconds")
-    #             interpolation_point = latency / 90
-    #             interpolated_prediction = self.interpolate_prediction(prediction, interpolation_point)
-    #             # Send the interpolated prediction to the tracking module
-    #             self.conn_send.send(struct.pack('2f', *interpolated_prediction.flatten()))
-            
-            
-    #             await asyncio.sleep(1/self.send_frequency)  # Adjust sleep time to control sending frequency
-
-    # async def send_prediction_loop(self):
-
-       
-    #     latest_prediction = None
-    #     latest_timestamp = None
-
-    #     period = 1.0 / self.send_frequency
-
-    #     print(
-    #         f"Starting to send interpolated predictions at "
-    #         f"{self.send_frequency} Hz to {self.send_host}:{self.send_port}..."
-    #     )
-
-    #     while True:
-    #         # Drain queue and keep only the newest prediction
-    #         while not self.prediction_queue.empty():
-    #             if self.receive_timestamps:
-    #                 latest_prediction, latest_timestamp = await self.prediction_queue.get()
-    #             else:
-    #                 latest_prediction = await self.prediction_queue.get()
-
-    #         if latest_prediction is not None:
-    #             latency = (
-    #                 datetime.datetime.now().timestamp()
-    #                 - latest_timestamp / 1e9
-    #             )
-
-    #             interpolation_point = latency / 90
-
-    #             interpolated_prediction = self.interpolate_prediction(
-    #                 latest_prediction,
-    #                 interpolation_point,
-    #             )
-
-    #             self.conn_send.send(
-    #                 struct.pack(
-    #                     "2f",
-    #                     *interpolated_prediction.flatten(),
-    #                 )
-    #             )
-
-    #         await asyncio.sleep(period)
 
     def send_prediction_loop(self):
 
@@ -430,15 +369,14 @@ class predictor:
         next_time = time.perf_counter()
 
         while True:
-            #print("Waiting for message from tracking module...")
             msg = self.conn_send.recv()
-            #print(f"Received message: {msg}")
-
+            print("received msg: ", msg)
             with self.prediction_lock:
                 prediction = self.latest_prediction
-                timestamp = self.latest_timestamp
+                timestamp_recv_mri = self.latest_timestamp_recv_mri
 
-            if prediction is None:
+            if prediction is None or np.isnan(prediction).any() and np.isnan(self.previous_prediction).any():
+                print("No prediction ready or NAN values for pred and also previous pred. Sending zeros.")
                 # sending zeros until we have a prediction
                 vec = ps.Vector()
                 vec.x = 0.0
@@ -455,33 +393,41 @@ class predictor:
                 self.conn_send.send(env.SerializeToString())
                 continue
 
-            latency = (
-                datetime.datetime.now().timestamp()
-                - timestamp / 1e9 + self.lookahead_time/1000
+
+            if np.isnan(prediction).any():
+                print("NAN values detected for prediction output.")
+                if not np.isnan(self.previous_prediction).any():
+                    print("Sending predictions of previous point")
+                    
+                    timestamp_recv_mri = self.previous_timestamp_recv_mri
+                    prediction = self.previous_prediction
+
+
+            latency_sam_lstm_ms = (
+                datetime.datetime.now().timestamp() * 1000
+                - timestamp_recv_mri / 1e6
+                + self.lookahead_time
             )
-            print(f"Latency: {latency:.4f} seconds")
-            interpolation_point = latency*1000 / 100
-            print(f"Interpolation point: {interpolation_point:.4f}")
+            print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")
+            interpolation_point = latency_sam_lstm_ms/ 1000 * self.img_frequency # ms -> prediction steps
             if interpolation_point > 4:
-                print("Interpolation point is greater than 4. Taking last predicion.")    
-            interpolated_prediction = self.interpolate_prediction(
-                prediction,
-                interpolation_point,
-            )
+                print("Interpolation horizon is greater than Predictions * MRI frequency. Taking last predicion.")    
+            interpolated_prediction = self.interpolate_prediction(prediction, interpolation_point)
 
             # Convert positions from pixel space to real space
             # MLC takes center of the image as (0,0)
-            interpolated_prediction = (interpolated_prediction-64)*1.95 #mm
+            interpolated_prediction_mm = (interpolated_prediction-self.img_size_px/2)*self.img_grid_mm #mm
 
             # create and send message
             vec = ps.Vector()
-            arr = np.asarray(interpolated_prediction).reshape(-1)
+            arr = np.asarray(interpolated_prediction_mm).reshape(-1)
 
             vec.x = float(arr[0])
             vec.y = float(arr[1])
             vec.z = float(arr[2])
 
-            print(datetime.datetime.now(),' replying x y z ',vec.x,' ',vec.y,' ',vec.z)
+
+            print(datetime.datetime.now(),' current predcition x y z ',vec.x,' ',vec.y,' ',vec.z)
             rep = ps.LetterRep()
             rep.payload = vec.SerializeToString()
             rep.message_type = ps.Letter.POSITION_VECTOR
@@ -489,10 +435,11 @@ class predictor:
             env.payload = rep.SerializeToString()
             env.message_type = ps.Envelope.LETTER_REP
             self.conn_send.send(env.SerializeToString())
-
+                            
+            
             if self.logging:
                 with open('/utrecht_exp/pred_log_file.txt', 'a') as f:
-                    f.write(f"Sent prediction: {interpolated_prediction} at {datetime.datetime.now()}\n")
+                    f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
 
             next_time += period
             sleep_time = next_time - time.perf_counter()
@@ -506,7 +453,7 @@ class predictor:
     
 # combine coroutines into single future
 async def main():
-    prediction_instance = predictor(receive_timestamps=True, send_frequency=50)
+    prediction_instance = predictor(receive_timestamps=True, send_frequency=100)
     prediction_instance.connect_sender(host_send, port_send)
     prediction_instance.connect(host,port)
     sender_thread = threading.Thread(
@@ -528,9 +475,5 @@ import asyncio
 asyncio.run(main())
 
 # aysncio.run(main())
-
-# %%
-
-
 
 

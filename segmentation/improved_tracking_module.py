@@ -20,7 +20,7 @@ port_send = 9002
 
 
 mrtc_port = 4005 # receiving images from MR
-stack_update_host = 'localhost'
+stack_update_host = '0.0.0.0'
 stack_update_port = 54323   # controlling the MR
 
 
@@ -70,7 +70,7 @@ class ReceiveImages:
         
 
         self.zmq_prot = True
-        self.emulation = True        
+        self.emulation = False        
         self.emu_path = "/utrecht_data/20260323/tmp/"
 
         # Asyncio queue
@@ -121,7 +121,7 @@ class ReceiveImages:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
 
     def connect(self, host=host_rec, port=port_rec):
-        if self.zmq_prot and not self.emulation:
+        if self.zmq_prot and not self.MRTC_prot and not self.emulation:
             import zmq
             self.context = zmq.Context()
             self.socket = self.context.socket(zmq.SUB)
@@ -134,6 +134,7 @@ class ReceiveImages:
             import pymri
             self.handler = pymri.QueuedImageHandler()
             print("ZMQ protocol enabled, setting up ZMQ image receiver")
+            print("port is ", self.mrtc_port)
             self.recv = pymri.MRTCImageReceiver.create(self.mrtc_port, self.stack_update_host, self.stack_update_port, self.handler, False) 
             
         elif self.emulation:
