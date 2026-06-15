@@ -29,26 +29,45 @@ from socket_model import LSTM
 device = torch.device('cuda:0')
 print(device)
 
-def better_manual_scaler(input_data,scale_range,backward=False):
+def better_manual_scaler(input_data, scale_range, backward=False):
     try:
         data = np.array(input_data.cpu())
     except:
         data = input_data
 
     if data.shape[1] == 1:
-        return ((data - np.min(data)) / (np.max(data) - np.min(data))) * (scale_range[1] - scale_range[0]) + scale_range[0], np.array((np.max(data),np.min(data)))
+        mn = np.min(data)
+        mx = np.max(data)
+        den = mx - mn
+        den = den if den != 0 else 1e-8
+
+        scaled = ((data - mn) / den) * (scale_range[1] - scale_range[0]) + scale_range[0]
+        return scaled, np.array((mx, mn))
+
     elif data.shape[1] > 1 and not backward:
-        orig_scale = np.zeros((data.shape[1],2))
+        orig_scale = np.zeros((data.shape[1], 2))
+
         for i in range(data.shape[1]):
-            orig_scale[i,:] = (np.max(data[:,i],axis=0),np.min(data[:,i],axis=0))
-            data[:,i] = ((data[:,i] - np.min(data[:,i],axis=0)) / (np.max(data[:,i],axis=0) - np.min(data[:,i],axis=0))) * (scale_range[1] - scale_range[0]) + scale_range[0]
-        return data,np.array(orig_scale)
+            mx = np.max(data[:, i], axis=0)
+            mn = np.min(data[:, i], axis=0)
+            den = mx - mn
+            den = den if den != 0 else 1e-8
+
+            orig_scale[i, :] = (mx, mn)
+
+            data[:, i] = ((data[:, i] - mn) / den) * (
+                scale_range[1] - scale_range[0]
+            ) + scale_range[0]
+
+        return data, np.array(orig_scale)
+
     elif data.shape[1] > 1 and backward:
         for i in range(data.shape[1]):
-            data[:,i] = ((data[:,i]) + 1) * (scale_range[1,i] - scale_range[0,i])/2 + scale_range[0,i]
-            
-        return data
+            data[:, i] = ((data[:, i]) + 1) * (
+                scale_range[1, i] - scale_range[0, i]
+            ) / 2 + scale_range[0, i]
 
+        return data
 
 def undo_sliding_window_norm(inputarray,sliding_window_range, dimension=1):
     """Undo the sliding window normalization
@@ -133,8 +152,6 @@ class predictor:
         self.first_data_point_received = False
 
         # Scaling params
-        self.img_grid_mm = 1.95  # mm
-        self.img_size_px = 128   # px
         self.img_frequency = 10  # Hz
 
         
@@ -161,7 +178,6 @@ class predictor:
                 self.lstm_model.eval()
                 dummy_input = torch.rand((1,self.input_size,self.input_dim)).float().to(device)
                 dummy_output = self.lstm_model(dummy_input)
-                #print(f"Dummy output shape: {dummy_output.shape}")
 
             for epoch in range(1):
                 self.lstm_model.train()
@@ -213,7 +229,6 @@ class predictor:
             self.socket.bind(f"tcp://{host}:{port}")
             print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
             print(self.socket.getsockopt(zmq.LAST_ENDPOINT))
-
             self.conn_send = self.socket
 
     async def receive_data(self):
@@ -232,7 +247,6 @@ class predictor:
                         buf += chunk
 
                     x, y, timestamp_ns = struct.unpack('2fQ', buf)
-                    #print(f"Received data: x={x}, y={y}, timestamp={timestamp_ns}")
                     data = torch.tensor([x,y]).to(device)
                     self.new_data_queue.put_nowait((data, timestamp_ns))
 
@@ -305,7 +319,7 @@ class predictor:
                             with self.prediction_lock:
                                 if self.no_prediction:
                                     self.previous_prediction = self.latest_prediction
-                                    self.latest_prediction = data[-1,:].cpu().numpy().copy()
+                                    self.latest_prediction = data.cpu().numpy().copy()
                                 else:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()
@@ -316,7 +330,7 @@ class predictor:
                             with self.prediction_lock:
                                 if self.no_prediction:
                                     self.previous_prediction = self.latest_prediction
-                                    self.latest_prediction = data[-1,:].cpu().numpy().copy()
+                                    self.latest_prediction = data.cpu().numpy().copy()
                                 else:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()                        
@@ -363,13 +377,11 @@ class predictor:
 
     def interpolate_prediction(self, prediction,interpolation_point):
         # prediction is shape (4,2)
-        if self.no_prediction:
-            return prediction
-        else:
-            new_prediction = np.zeros(3)
-            new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])
-            new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])  
-            new_prediction[2] = self.img_size_px
+
+        new_prediction = np.zeros(3)
+        new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])
+        new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])  
+        new_prediction[2] = 0
         return new_prediction
 
 
@@ -450,11 +462,12 @@ class predictor:
             interpolation_point = latency_sam_lstm_ms/ 1000 * self.img_frequency # ms -> prediction steps
             if interpolation_point > 4:
                 print("Interpolation horizon is greater than Predictions * MRI frequency. Taking last predicion.")    
-            interpolated_prediction = self.interpolate_prediction(prediction, interpolation_point)
-
-            # Convert positions from pixel space to real space
-            # MLC takes center of the image as (0,0)
-            interpolated_prediction_mm = (interpolated_prediction-self.img_size_px)*self.img_grid_mm #mm
+            
+            
+            if self.no_prediction:
+                interpolated_prediction_mm = prediction
+            else:
+                interpolated_prediction_mm = self.interpolate_prediction(prediction, interpolation_point)
 
             # create and send message
             vec = ps.Vector()

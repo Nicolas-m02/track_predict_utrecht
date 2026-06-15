@@ -48,7 +48,7 @@ testing = False
 
 from scipy.ndimage import center_of_mass
 
-def torch_center_of_mass(mask):
+def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
     mask = mask.float()
     h, w = mask.shape[-2:]
     y = torch.arange(h, device=mask.device).view(-1, 1)
@@ -58,7 +58,14 @@ def torch_center_of_mass(mask):
     cy = (mask * y).sum() / total
     cx = (mask * x).sum() / total
 
-    return torch.stack([cy, cx])
+    dy_px = cy - img_size_px/2
+    dx_px = cx - img_size_px/2
+
+    dx_mm = dx_px * voxel_size_mm
+    dy_mm = -dy_px * voxel_size_mm
+
+
+    return torch.stack([dx_mm, dy_mm])
 
 
 
@@ -90,11 +97,13 @@ class ReceiveImages:
         self.send_timestamps = send_timestamps
         self.protocol = protocol
 
-        self.MRTC_prot = True
+        self.MRTC_prot = False
         self.mrtc_port = mrtc_port 
         self.stack_update_host = stack_update_host
         self.stack_update_port = stack_update_port   
 
+        self.voxel_size_mm = 1.95
+        self.img_size_px = 128
 
         self.frame_no = 0
 
@@ -130,7 +139,7 @@ class ReceiveImages:
             print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
             self.conn = self.socket
 
-        if self.zmq_prot and self.MRTC_prot and not self.emulation:
+        elif self.zmq_prot and self.MRTC_prot and not self.emulation:
             import pymri
             self.handler = pymri.QueuedImageHandler()
             print("ZMQ protocol enabled, setting up ZMQ image receiver")
@@ -232,25 +241,8 @@ class ReceiveImages:
                 raw = msg[idx + len(sep):]
 
                 arr = np.frombuffer(raw, dtype=np.float32)
-                print("received bytes with shape", arr.shape)
 
                 img_array = arr.reshape(meta["dim"])
-                """
-                plt.clf()
-                
-                if img_array.ndim == 2:
-                    plt.imshow(img_array, cmap="gray")
-
-                elif img_array.ndim == 3:
-                    # show first slice
-                    plt.imshow(img_array[0], cmap="gray")
-
-                else:
-                    print("unsupported dimensions:", img_array.shape)
-
-                plt.title(f"shape={img_array.shape}")
-                plt.pause(0.001)
-                """
 
                 if self.send_timestamps:
                     await self.seen_images_queue.put((img_array, meta["timestamp"]))
@@ -400,7 +392,7 @@ class ReceiveImages:
             else:
                 new_mask = await self.masks_queue.get()
 
-            new_com = torch_center_of_mass(new_mask)
+            new_com = torch_center_of_mass(new_mask, self.img_size_px, self.voxel_size_mm)
             
             if self.send_timestamps:
                 self.coms_queue.put_nowait((new_com, timestamp))
