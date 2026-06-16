@@ -103,12 +103,9 @@ class ReceiveImages:
         self.stack_update_port = stack_update_port   
 
         self.voxel_size_mm = 1.95
-        self.img_size_px = 128
+        self.img_size_px = image_dimensions[0]
 
         self.frame_no = 0
-
-        # Testing params
-        self.break_point = 100  # Set a break point after which to stop receiving images for testing purposes
         
 
         # SAM 2 initialization
@@ -189,7 +186,7 @@ class ReceiveImages:
 
 
     async def receive_images(self):
-        if self.zmq_prot and not self.MRTC_prot:
+        if self.zmq_prot and not self.MRTC_prot and not self.emulation:
             while True:
 
                 # receive message
@@ -262,6 +259,8 @@ class ReceiveImages:
 
                 if image is not None:
 
+                    self.current_angle = int(np.round(math.degrees(math.atan2(image['row_direction_cosines'][1], image['row_direction_cosines'][0]))))
+                    print(f"Current angle: {self.current_angle}")
                     if self.send_timestamps:
                         await self.seen_images_queue.put((image['data'], image['timestamp']))
                     else:
@@ -358,6 +357,7 @@ class ReceiveImages:
                                     print(f"No prompt found for angle {self.current_angle}, using default prompt")
                                     _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.last_angle)])
                                 else:
+                                    print(f"Using prompt for angle {self.current_angle}")
                                     _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.current_angle)])
                                 self.last_angle = self.current_angle
 

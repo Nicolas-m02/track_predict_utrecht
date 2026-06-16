@@ -18,12 +18,13 @@ testing = False
 host_send = '0.0.0.0'
 port_send = 9003
 
-host_gui = 'gui_container'
+host_gui = 'utrecht_gui_02'
 port_gui = 7005 # Tracker is 7000
 
 
 lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
 
+os.chdir('/utrecht_exp/code/socket_experiments')
 from socket_model import LSTM
 
 device = torch.device('cuda:0')
@@ -105,7 +106,7 @@ import datetime
 
 class predictor:
     
-    def __init__(self,send_frequency=None,receive_timestamps=False):
+    def __init__(self,receive_timestamps=False,send_frequency=None):
         self.input_size = 100
         self.output_size = 4
         self.input_dim = 2

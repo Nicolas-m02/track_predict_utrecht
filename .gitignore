@@ -14,3 +14,4 @@
 *.pth
 *.tsv
 *.txt
+/segmentation/sam2/*
