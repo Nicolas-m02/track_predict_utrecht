@@ -3,11 +3,12 @@ import numpy as np
 
 
 time_spacing = 10 # ms
-
+hz = 11 #Hz
 trace_spacing = 1000/11 # ms
 px_to_mm = 3.6
 
-sample_trace = np.loadtxt('/utrecht_exp/data/eval_199CORfixed_angles_trace_3_outer.npy')*px_to_mm
+# sample_trace = np.loadtxt('/utrecht_exp/data/eval_199CORfixed_angles_trace_3_outer.npy')*px_to_mm
+sample_trace = np.loadtxt('/utrecht_exp/data/quasar_traces/original_traces/2_2_COR_0_fixed_angles_trace_3_outer.npy')*px_to_mm
 
 print(f"Sample trace shape: {sample_trace.shape}")
 print(f"Maximum value in sample trace: {np.max(sample_trace[:,1])-np.mean(sample_trace[:,1])} mm")
@@ -15,7 +16,7 @@ print(f"Minimum value in sample trace: {np.min(sample_trace[:,1])-np.mean(sample
 total_time = trace_spacing * sample_trace.shape[0] # ms
 
 print(f"Total time: {total_time} ms")
-
+print(f"Time {total_time/1000:.2f} seconds")
 
 #%%
 interpolation_type = 'linear' # 'linear' or 'cubic'
@@ -45,10 +46,10 @@ normalized_trace = 2 * ((interpolated_trace - np.min(interpolated_trace)) / (np.
 print(np.max(normalized_trace), np.min(normalized_trace))
 #%% save interpolated trace
 
-qrm_file = '/utrecht_exp/results/quasar_traces/real_trace.qrm'
+qrm_file = '/utrecht_exp/data/quasar_traces/qrm_converted/volunteer_outer-sector_trace.qrm'
 
 with open(qrm_file, 'w') as f:
-    f.write('% QUASAR Respiratory + Cardiac motion file\r\n')
+    f.write('% QUASAR Respiratory motion file\r\n')
     f.write(f'{normalized_trace.shape[0]}\r\n')
     f.write('1.5\r\n') 
     for val in normalized_trace:

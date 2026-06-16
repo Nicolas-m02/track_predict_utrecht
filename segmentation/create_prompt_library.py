@@ -27,7 +27,7 @@ while True:
 
     if image is not None:
         image_data = image['data']
-        direction_cosines = math.degrees(math.atan2(image['row_direction_cosines'][1], image['row_direction_cosines'][0]))
+        direction_cosines = int(np.round(math.degrees(math.atan2(image['row_direction_cosines'][1], image['row_direction_cosines'][0]))))
         all_images.append((image_data, direction_cosines))
     
     if len(all_images) >= len(os.listdir(emu_path))-5:  # Stop after receiving 10 images for demonstration
@@ -37,8 +37,8 @@ while True:
 
 #%%
 
-all_cosines = [np.round(cosines, 2) for _, cosines in all_images]
-all_images_data = [np.round(data, 2) for data, _ in all_images]
+all_cosines = [cosines for _, cosines in all_images]
+all_images_data = [data for data, _ in all_images]
 
 
 print(np.unique(all_cosines))
