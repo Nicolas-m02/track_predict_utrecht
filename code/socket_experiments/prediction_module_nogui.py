@@ -1,43 +1,69 @@
 #%%
 import os
-
+import sys
+import threading
 import asyncio
 import socket
 import torch
 import torch.nn as nn
 import struct
 import numpy as np
+import datetime
+import PositionServer_pb2 as ps
 
 host = "0.0.0.0"
-port = 9001  # change to 1221 for COM from SAM2
+port = 9002  
 testing = False
 
-lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
+host_send = '0.0.0.0'
+port_send = 9003
 
+lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
+os.chdir('/utrecht_exp/code/socket_experiments')
 from socket_model import LSTM
 
-# device = torch.device('cuda:1' if torch.cuda.is_available() and torch.cuda.device_count() > 1 else 'cpu')
 
 device = torch.device("cuda:0")
+print(device)
 
-def better_manual_scaler(input_data,scale_range,backward=False):
+def better_manual_scaler(input_data, scale_range, backward=False):
     try:
         data = np.array(input_data.cpu())
     except:
         data = input_data
 
     if data.shape[1] == 1:
-        return ((data - np.min(data)) / (np.max(data) - np.min(data))) * (scale_range[1] - scale_range[0]) + scale_range[0], np.array((np.max(data),np.min(data)))
+        mn = np.min(data)
+        mx = np.max(data)
+        den = mx - mn
+        den = den if den != 0 else 1e-8
+
+        scaled = ((data - mn) / den) * (scale_range[1] - scale_range[0]) + scale_range[0]
+        return scaled, np.array((mx, mn))
+
     elif data.shape[1] > 1 and not backward:
-        orig_scale = np.zeros((data.shape[1],2))
+        orig_scale = np.zeros((data.shape[1], 2))
+
         for i in range(data.shape[1]):
-            orig_scale[i,:] = (np.max(data[:,i],axis=0),np.min(data[:,i],axis=0))
-            data[:,i] = ((data[:,i] - np.min(data[:,i],axis=0)) / (np.max(data[:,i],axis=0) - np.min(data[:,i],axis=0))) * (scale_range[1] - scale_range[0]) + scale_range[0]
-        return data,np.array(orig_scale)
+            mx = np.max(data[:, i], axis=0)
+            mn = np.min(data[:, i], axis=0)
+            den = mx - mn
+            den = den if den != 0 else 1e-8
+
+            orig_scale[i, :] = (mx, mn)
+
+            data[:, i] = ((data[:, i] - mn) / den) * (
+                scale_range[1] - scale_range[0]
+            ) + scale_range[0]
+
+        return data, np.array(orig_scale)
+
     elif data.shape[1] > 1 and backward:
         for i in range(data.shape[1]):
-            data[:,i] = ((data[:,i]) + 1) * (scale_range[1,i] - scale_range[0,i])/2 + scale_range[0,i]
-            
+            data[:, i] = ((data[:, i]) + 1) * (
+                scale_range[1, i] - scale_range[0, i]
+            ) / 2 + scale_range[0, i]
+
         return data
 
 
@@ -77,7 +103,7 @@ import datetime
 
 class predictor:
     
-    def __init__(self):
+    def __init__(self,receive_timestamps=False,send_frequency=None):
         self.input_size = 100
         self.output_size = 4
         self.input_dim = 2
@@ -87,13 +113,10 @@ class predictor:
         self.num_layers = 5
 
         self.new_data_queue = asyncio.Queue()
-        
+        self.receive_timestamps = receive_timestamps
 
         self.seen_data = torch.zeros((0,self.input_dim)).float().to(device)
         self.received_first_data_point = False
-        self.stopping_point = 850
-
-        self.prediction_history = []
 
         self.true_history = []
 
@@ -112,7 +135,9 @@ class predictor:
 
         self.current_data_point = 0
         self.current_prediction_point = 0
+        self.current_optimization_point = 0
 
+        # Online optimization parameters
         self.optimizer = torch.optim.Adam(self.lstm_model.parameters(), lr=1e-5)
         self.online_epochs = 4
         self.online_batch_size = 200
@@ -120,19 +145,30 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
+        self.no_prediction = False
         self.logging = True
         self.first_data_point_received = False
 
-        # Params for GUI
-        self.interpolation_point = 2.5 # latency ms/4 * Frequency ms
-        self.prediction_queue = asyncio.Queue()
+        # Scaling params
+        self.img_frequency = 10  # Hz
+        # Params for sending predictions
+        self.send_frequency = send_frequency
+        import threading
 
+        self.latest_prediction = None
+        self.previous_prediction = None
+        self.latest_timestamp_recv_mri = None
+        self.previous_timestamp_recv_mri = None
+        self.lookahead_time = 250 #ms
+        self.prediction_lock = threading.Lock()
+
+
+        # LSTM Startup
         for i in range(3):
             with torch.no_grad():
                 self.lstm_model.eval()
                 dummy_input = torch.rand((1,self.input_size,self.input_dim)).float().to(device)
                 dummy_output = self.lstm_model(dummy_input)
-                #print(f"Dummy output shape: {dummy_output.shape}")
 
             for epoch in range(1):
                 self.lstm_model.train()
@@ -156,6 +192,10 @@ class predictor:
                 f.write('Online received data log\n')
                 f.write('=======================\n')
 
+            with open('/utrecht_exp/pred_log_file.txt', 'w') as f:
+                f.write('Predictions \n')
+                f.write('=======================\n')
+
     def connect(self,host=host, port=port): # receiver
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -165,58 +205,43 @@ class predictor:
         self.conn, self.addr = self.s.accept()
         print("Connected by", self.addr)
 
-
-    async def predict(self):
-        while True:
-
-            prediction = await self.prediction_queue.get()
-                
-
-            if prediction is not None:
-                self.current_prediction_point += 1
-                # print("Prediction:", prediction)
-                # print("Seen data:", self.seen_data)
-                # print(data)
-                self.prediction_history.append(prediction)
-                #print(prediction)
-                if self.logging:
-                    with open(self.log_file, 'a') as f:
-                        f.write(f"Prediction: {prediction[-1,:]} at {datetime.datetime.now()}\n")
-                                
-                if len(self.prediction_history) > self.stopping_point:
-                    print("Stopping point reached. Closing connection.")
-                    self.close_connection()
-                    import matplotlib.pyplot as plt
-                    
-                    print(len(self.prediction_history))
-
-                    plt.figure(figsize=(10,5))
-                    plt.plot(np.array(self.prediction_history)[-104:-4,3,1],'b-o',label='Predicted SI')
-                    plt.plot(np.array(self.true_history)[-100:,1], 'r-o',label='Actual SI')
-                    plt.legend()
-                    plt.title('Predicted vs Actual SI')
-
-                    import os
-                    os.makedirs('/utrecht_exp/results', exist_ok=True)
-                    print(np.array(self.prediction_history).shape)
-                    np.savetxt('/utrecht_exp/results/prediction_history.npy', np.array(self.prediction_history)[:,3,:])
-                    np.savetxt('/utrecht_exp/results/true_history.npy', np.array(self.true_history))
-
-                    break
-
-                await self.optimize_online()
-            await asyncio.sleep(0.001)  # Adjust sleep time as needed to control loop frequency
-                
-            
-
+    def connect_sender(self,host=host_send, port=port_send): # sender
+        if self.send_frequency is not None:
+            self.send_host = host_send
+            self.send_port = port_send
+            import zmq
+            self.context = zmq.Context()
+            self.socket = self.context.socket(zmq.REP)
+            self.socket.bind(f"tcp://{host}:{port}")
+            print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
+            print(self.socket.getsockopt(zmq.LAST_ENDPOINT))
+            self.conn_send = self.socket
 
     async def receive_data(self):
         while True:
             try:
-                data = torch.tensor(struct.unpack('2f', self.conn.recv(1024))).float().to(device)
-                #print(data.shape)
-                self.new_data_queue.put_nowait(data)
-            except:
+                if self.receive_timestamps:
+                    
+                    SIZE = struct.calcsize('2fQ')
+
+                    buf = b''
+                    while len(buf) < SIZE:
+                        chunk = self.conn.recv(SIZE - len(buf))
+                        if not chunk:
+                            print("socket closed")
+                            sys.exit()
+                        buf += chunk
+
+                    x, y, timestamp_ns = struct.unpack('2fQ', buf)
+                    data = torch.tensor([x,y]).to(device)
+                    self.new_data_queue.put_nowait((data, timestamp_ns))
+
+                else:
+                    data = torch.tensor(struct.unpack('2f', self.conn.recv(1024))).to(device)
+                    self.new_data_queue.put_nowait((data, timestamp_ns))
+
+            except Exception as e:
+                print(f"Error occurred: {e}")
                 pass
 
 
@@ -229,7 +254,11 @@ class predictor:
             if testing:
                 return [0]
             else:
-                data = await self.new_data_queue.get()
+                if self.receive_timestamps:
+                    data, timestamp_recv_mri = await self.new_data_queue.get()
+                    
+                else:
+                    data = await self.new_data_queue.get()
                 self.true_history.append(data.cpu().numpy())
 
                 if self.logging:
@@ -239,7 +268,6 @@ class predictor:
 
                 if self.first_data_point_received == False:
                     self.first_data_point_received = True
-                    #print(data.shape)
                     self.seen_data = torch.tensor(data[None,:]).float().to(device)
                     print("First data point received. Starting prediction loop...")
                     print(self.seen_data.shape)
@@ -272,66 +300,182 @@ class predictor:
 
                     output = undo_sliding_window_norm(output.cpu().numpy(),orig_scale,dimension=2)
                     if output is not None:
-                        self.prediction_queue.put_nowait(output)
-                    
+                        if self.receive_timestamps:
+                            with self.prediction_lock:
+                                if self.no_prediction:
+                                    self.previous_prediction = self.latest_prediction
+                                    self.latest_prediction = data.cpu().numpy().copy()
+                                else:
+                                    self.previous_prediction = self.latest_prediction
+                                    self.latest_prediction = output.copy()
+                                    self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
+                                    self.latest_timestamp_recv_mri = timestamp_recv_mri
+                        else:
+                            with self.prediction_lock:
+                                if self.no_prediction:
+                                    self.previous_prediction = self.latest_prediction
+                                    self.latest_prediction = data.cpu().numpy().copy()
+                                else:
+                                    self.previous_prediction = self.latest_prediction
+                                    self.latest_prediction = output.copy()                        
+                        self.current_prediction_point += 1
+
+                        if self.logging:
+                            with open(self.log_file, 'a') as f:
+                                f.write(f"Prediction: {output[-1,:]} at {datetime.datetime.now()}\n")
+                                
+
                         #print("Queue size:", self.prediction_queue.qsize())
             
                 await asyncio.sleep(0.001) 
-                
-                
-
+    
 
     async def optimize_online(self):
-        # Simulate online optimization of the model based on the received data and predictions
-        # split online_batched_data into input and target
-        if len(self.online_batched_data) >= self.online_batch_size:
-            start_time = time.time()
+
+        while True:
+            await asyncio.sleep(0.001)
+
+            if self.current_prediction_point > self.current_optimization_point and len(self.online_batched_data) >= self.online_batch_size:
+                #start_time = time.time()
+                
+                # Splitting into input and target            
+                self.online_input = self.online_batched_data[:,-self.input_size:-self.output_size,:].unsqueeze(0)
+                self.online_target = self.online_batched_data[:,-self.output_size:,:].unsqueeze(0)
+
+                self.lstm_model.train()
+                for epoch in range(self.online_epochs):
+                    self.optimizer.zero_grad()
+                    output = self.lstm_model(self.online_input[0,:,:])
+                    loss = nn.MSELoss()(output, self.online_target.squeeze(0))
+                    loss.backward()
+                    self.optimizer.step()
+                
+                # crop out last point
+                self.online_batched_data = self.online_batched_data[1:,:,:]
+                #end_time = time.time()
+                #print(f"Online optimization took {end_time - start_time:.4f} seconds.")
+                self.current_optimization_point += 1
             
-            # Splitting into input and target            
-            self.online_input = self.online_batched_data[:,-self.input_size:-self.output_size,:].unsqueeze(0)
-            self.online_target = self.online_batched_data[:,-self.output_size:,:].unsqueeze(0)
+            else:
+                pass
 
-            # print(self.online_input[0,:,:].shape)
-            # print(self.online_target.squeeze(0).shape)
-            self.lstm_model.train()
-            for epoch in range(self.online_epochs):
-                self.optimizer.zero_grad()
-                output = self.lstm_model(self.online_input[0,:,:])
-                loss = nn.MSELoss()(output, self.online_target.squeeze(0))
-                loss.backward()
-                self.optimizer.step()
-            
-            # crop out last point
-            self.online_batched_data = self.online_batched_data[1:,:,:]
-            end_time = time.time()
-            print(f"Online optimization took {end_time - start_time:.4f} seconds.")
-
-        
-        else:
-            pass
-
-    def interpolate_prediction(self, prediction):
-        # prediction is shape (4,2)
-        new_prediction = np.zeros((1,2))
-        new_prediction[:,0] = np.interp(self.interpolation_point, np.arange(1, 5, 1), prediction[:,1])
-        new_prediction[:,1] = np.interp(self.interpolation_point, np.arange(1, 5, 1), prediction[:,0])
+    def interpolate_prediction(self, prediction,interpolation_point):
+        # prediction is shape (4,2), no prediction is shape (2,)
+        new_prediction = np.zeros(3)
+        new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])
+        new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])  
+        new_prediction[2] = 0
         return new_prediction
 
+    def send_prediction_loop(self):
 
-   
-    async def close_connection(self):
-        self.conn.close()
-        self.s.close()
+        period = 1.0 / self.send_frequency
 
+        print(
+            f"Starting to send interpolated predictions at "
+            f"{self.send_frequency} Hz"
+        )
+
+        next_time = time.perf_counter()
+
+        while True:
+            msg = self.conn_send.recv()
+            print("received msg: ", msg)
+            with self.prediction_lock:
+                prediction = self.latest_prediction
+                timestamp_recv_mri = self.latest_timestamp_recv_mri
+
+            if prediction is None or np.isnan(prediction).any() and np.isnan(self.previous_prediction).any():
+                print("No prediction ready or NAN values for pred and also previous pred. Sending zeros.")
+                # sending zeros until we have a prediction
+                vec = ps.Vector()
+                vec.x = 0.0
+                vec.y = 0.0
+                vec.z = 0.0
+
+                print(datetime.datetime.now(),' x y z ',vec.x,' ',vec.y,' ',vec.z)
+                rep = ps.LetterRep()
+                rep.payload = vec.SerializeToString()
+                rep.message_type = ps.Letter.POSITION_VECTOR
+                env = ps.Envelope()
+                env.payload = rep.SerializeToString()
+                env.message_type = ps.Envelope.LETTER_REP
+                self.conn_send.send(env.SerializeToString())
+                continue
+
+
+            if np.isnan(prediction).any():
+                print("NAN values detected for prediction output.")
+                if not np.isnan(self.previous_prediction).any():
+                    print("Sending predictions of previous point")
+                    
+                    timestamp_recv_mri = self.previous_timestamp_recv_mri
+                    prediction = self.previous_prediction
+
+
+            latency_sam_lstm_ms = (
+                datetime.datetime.now().timestamp() * 1000
+                - timestamp_recv_mri / 1e6
+                + self.lookahead_time
+            )
+            print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")
+            interpolation_point = latency_sam_lstm_ms/ 1000 * self.img_frequency # ms -> prediction steps
+            if interpolation_point > 4:
+                print("Interpolation horizon is greater than Predictions * MRI frequency. Taking last predicion.")    
+            
+            if self.no_prediction:
+                interpolated_prediction_mm = prediction
+            else:
+                interpolated_prediction_mm = self.interpolate_prediction(prediction, interpolation_point)
+
+            # create and send message
+            vec = ps.Vector()
+            arr = np.asarray(interpolated_prediction_mm).reshape(-1)
+
+            vec.x = float(arr[0])
+            vec.y = float(arr[1])
+            vec.z = float(arr[2])
+
+
+            print(datetime.datetime.now(),' current predcition x y z ',vec.x,' ',vec.y,' ',vec.z)
+            rep = ps.LetterRep()
+            rep.payload = vec.SerializeToString()
+            rep.message_type = ps.Letter.POSITION_VECTOR
+            env = ps.Envelope()
+            env.payload = rep.SerializeToString()
+            env.message_type = ps.Envelope.LETTER_REP
+            self.conn_send.send(env.SerializeToString())
+                            
+            
+            if self.logging:
+                with open('/utrecht_exp/pred_log_file.txt', 'a') as f:
+                    f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
+
+            next_time += period
+            sleep_time = next_time - time.perf_counter()
+
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            else:
+                next_time = time.perf_counter()
+
+
+    
 # combine coroutines into single future
 async def main():
-    prediction_instance = predictor()
+    prediction_instance = predictor(receive_timestamps=True, send_frequency=100)
+    prediction_instance.connect_sender(host_send, port_send)
     prediction_instance.connect(host,port)
+    sender_thread = threading.Thread(
+        target=prediction_instance.send_prediction_loop,
+        daemon=True
+    )
+    sender_thread.start()
     print("Starting prediction loop...")
     await asyncio.gather(
                                 prediction_instance.receive_data(),
-                                prediction_instance.predict(),
                                 prediction_instance.make_prediction(),
+                                prediction_instance.optimize_online(),
                                 )
 
 
@@ -341,9 +485,5 @@ import asyncio
 asyncio.run(main())
 
 # aysncio.run(main())
-
-# %%
-
-
 
 

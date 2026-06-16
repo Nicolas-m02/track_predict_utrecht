@@ -8,10 +8,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import asyncio
 import base64
+import socket
+import struct 
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 clients = []
+
+click_queue = asyncio.Queue()
 
 print("Server started, generating stream...")
 
@@ -25,8 +29,47 @@ async def websocket_endpoint(ws: WebSocket):
     clients.append(ws)
     try:
         while True:
-            await asyncio.sleep(1)
-    except:
+
+            # data = await ws.receive_json()
+            try:
+                data = await asyncio.wait_for(
+                    ws.receive_json(),
+                    timeout=0.01
+                )
+
+                if data is not None:
+                    print("Received:", data)
+
+                    if data["type"] == "click":
+
+                        x = data["x"]
+                        y = data["y"]
+
+                        await click_queue.put((x, y))
+                        print(f"Click at ({x}, {y})")
+            except asyncio.TimeoutError:
+                pass
+
+            await asyncio.sleep(0.001)
+
+
+
+            # if data is not None:
+            #     print("Received:", data)
+
+            #     if data["type"] == "click":
+
+            #         x = data["x"]
+            #         y = data["y"]
+
+            #         await click_queue.put((x, y))
+            #         print(f"Click at ({x}, {y})")
+
+
+    except Exception as e:
+        print(f"Error occurred: {e}")
+
+    finally:
         clients.remove(ws)
 
 
@@ -38,25 +81,6 @@ import base64
 import numpy as np
 import cv2
 
-async def test_stream_data():
-    t = 0
-    while True:
-        # Simulate a frame
-        img = np.zeros((240, 320, 3), dtype=np.uint8)
-        cv2.putText(img, f"t={t}", (50,120),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-        _, buffer = cv2.imencode('.jpg', img)
-        frame_b64 = base64.b64encode(buffer).decode()
-
-        # Simulate time-series
-        value = math.sin(t * 0.1) + math.cos(t * 0.8)
-
-        # Send to all connected clients
-        await broadcast({"frame": frame_b64, "value": value, "t": t})
-        print(f"Sent t={t}, value={value}")  # log
-
-        t += 1
-        await asyncio.sleep(0.09) 
 
 # Start streaming when FastAPI starts
 # @app.on_event("startup")
@@ -72,7 +96,8 @@ log_file_path = "/utrecht_exp/gui/stream_log.txt"
 with open(log_file_path, "w") as log_file:
     log_file.write("frame,byte_time,total_time\n")
 
-height, width = 112,112
+# height, width = 112,112
+height, width = 128,128
 current_frame = 0
 latest_frame = None
 latest_value = None
@@ -82,6 +107,10 @@ latest_value = None
 async def receive_images():
     host = '0.0.0.0'
     port = 7000
+
+    host_click = '0.0.0.0'
+    post_click = 8000
+
     print(f"Starting image receiver on {host}:{port}...")
     
     # Run socket in thread so we don't block asyncio
@@ -98,9 +127,12 @@ def socket_loop(host, port):
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((host, port))
     s.listen(1)
+
+
     print("Waiting for image sender...")
     conn, addr = s.accept()
     print(f"Connected by {addr}")
+
 
     while True:
         start_time = time.time()
@@ -192,15 +224,34 @@ def prediction_socket_loop(host, port):
     while True:
         try:
             data = np.array(struct.unpack('2f', conn_pred.recv(1024)))
-            print(data.shape) 
+            #print(data.shape) 
             latest_value = data[1]  # Assume the second value is the one we want
-            print(f"Received prediction: {latest_value}")
+            #print(f"Received prediction: {latest_value}")
         except Exception as e:
             #print(f"Error receiving prediction: {e}")
             data = None
         
-        
+async def send_clicks(host_click='0.0.0.0', port_click=8000):
+    c = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    c.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    c.bind((host_click, port_click))
+    c.listen(1)
 
+    print("Connection to click server...")
+    conn_click, addr_click = c.accept()
+    print(f"Connected to click server by {addr_click}")
+
+
+    while True:
+
+        x, y = await click_queue.get()
+        try:
+            conn_click.sendall(struct.pack('2f', x, y))
+            print(f"Sent click: ({x}, {y})")
+        except Exception as e:
+            print(f"Error sending click: {e}")
+
+        await asyncio.sleep(0.005)  # Small delay to prevent overwhelming the socket
 
 # Broadcasting functions
 async def broadcast(data):
@@ -234,4 +285,4 @@ async def startup_event():
     asyncio.create_task(receive_images())
     asyncio.create_task(receive_predictions())
     asyncio.create_task(periodic_broadcast())
-
+    #asyncio.create_task(send_clicks())

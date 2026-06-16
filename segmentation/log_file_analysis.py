@@ -1,9 +1,9 @@
-
 #%%
 import matplotlib.pyplot as plt
 import numpy as np
 import datetime
 
+im_send_file = '/utrecht_exp/logs/real_time_image_send_log.txt'
 im_receive_file = '/utrecht_exp/logs/receive_images_enter.txt'
 
 com_send_file = '/utrecht_exp/logs/receive_images_exit.txt'
@@ -38,7 +38,6 @@ send_receive_ims = []
 receive_track_ims = []
 track_receive_coms = []
 receive_predict_coms = []
-
 
 for i in range(len(com_send_lines)):
     receive_line = im_receive_lines[i]

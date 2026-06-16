@@ -15,6 +15,35 @@
     <script>
         const ws = new WebSocket(`ws://${location.host}/ws`);
 
+        const video = document.getElementById('video');
+
+
+        // -----------------------------
+        // CLICK HANDLING
+        // -----------------------------
+        video.addEventListener('click', (event) => {
+
+            const rect = video.getBoundingClientRect();
+
+            // Mouse position inside displayed image
+            const displayX = event.clientX - rect.left;
+            const displayY = event.clientY - rect.top;
+
+            // Convert to ORIGINAL image coordinates
+            // Original backend image = 128x128
+            const x = Math.round(displayX * (128 / rect.width));
+            const y = Math.round(displayY * (128 / rect.height));
+
+            console.log("Clicked:", x, y);
+
+            // Send click to backend
+            ws.send(JSON.stringify({
+                type: "click",
+                x: x,
+                y: y
+            }));
+        });
+
         const ctx = document.getElementById('chart').getContext('2d');
         const chart = new Chart(ctx, {
             type: 'line',
@@ -31,7 +60,7 @@
             const data = JSON.parse(event.data);
 
             // Update video
-            document.getElementById('video').src = 'data:image/jpeg;base64,' + data.frame;
+            video.src = 'data:image/jpeg;base64,' + data.frame;
 
             // Update chart
             chart.data.labels.push(data.t);
@@ -44,6 +73,7 @@
 
             chart.update('none'); // low latency
         };
+
     </script>
 </body>
 </html>

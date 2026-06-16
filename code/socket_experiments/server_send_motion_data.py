@@ -23,8 +23,8 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
 # Define the host and port to connect to
-host = 'localhost'  # or use '
-port = 9001
+host = 'prediction_container'  # or use '
+port = 9002
 
 # Connect to the server
 s.connect((host, port))
