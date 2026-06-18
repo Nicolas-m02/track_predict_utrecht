@@ -167,6 +167,7 @@ class predictor:
         self.previous_prediction = None
         self.latest_timestamp_recv_mri = None
         self.previous_timestamp_recv_mri = None
+        self.prediction_done_timestamp = None
         self.lookahead_time = 250 #ms
         self.prediction_lock = threading.Lock()
 
@@ -191,17 +192,16 @@ class predictor:
         print('Warmed up LSTM model with dummy data.')
 
         if self.logging:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.log_file = f"/utrecht_exp/logs/online_log_{timestamp}.txt"
-            with open(self.log_file, 'w') as f:
+            self.time_logging = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'w') as f:
                 f.write('Online optimization log\n')
                 f.write('=======================\n')
 
-            with open('/utrecht_exp/logs/online_received.txt', 'w') as f:
+            with open(f'/utrecht_exp/logs/online_received_{self.time_logging}.txt', 'w') as f:
                 f.write('Online received data log\n')
                 f.write('=======================\n')
 
-            with open('/utrecht_exp/pred_log_file.txt', 'w') as f:
+            with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'w') as f:
                 f.write('Predictions \n')
                 f.write('=======================\n')
 
@@ -258,6 +258,7 @@ class predictor:
 
                     data = torch.tensor([v.x, v.y], device=device)
                     print(data)
+                    print("WARNING: no timestamp detected")
                     timestamp_ns = time.time_ns()                        # timestamp not sent in msg therefore create timestamp when receiving motion
                     self.new_data_queue.put_nowait((data, timestamp_ns))       
 
@@ -304,7 +305,7 @@ class predictor:
                 self.true_history.append(data.cpu().numpy())
 
                 if self.logging:
-                    with open('/utrecht_exp/logs/online_received.txt', 'a') as f:
+                    with open(f'/utrecht_exp/logs/online_received_{self.time_logging}.txt', 'a') as f:
                         f.write(f"Received data: {data.cpu().numpy()} at {datetime.datetime.now()}\n")
                 self.current_data_point += 1
 
@@ -322,8 +323,6 @@ class predictor:
                 if len(self.seen_data) >= self.input_size:
                     #print("Seen data:", self.seen_data)
                     self.lstm_model.eval()
-
-
                     
                     input_data,orig_scale = better_manual_scaler(self.seen_data, [-1,1])
                     
@@ -363,9 +362,10 @@ class predictor:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()                        
                         self.current_prediction_point += 1
+                        self.prediction_done_timestamp = datetime.datetime.now().timestamp()
 
                         if self.logging:
-                            with open(self.log_file, 'a') as f:
+                            with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'a') as f:
                                 f.write(f"Prediction: {output[-1,:]} at {datetime.datetime.now()}\n")
                                 
 
@@ -455,12 +455,21 @@ class predictor:
                     timestamp_recv_mri = self.previous_timestamp_recv_mri
                     prediction = self.previous_prediction
 
-
+            # Variant A: Get time between MRI and current, and add the time that the MLCs need to get to this position
             latency_sam_lstm_ms = (
                 datetime.datetime.now().timestamp() * 1000
                 - timestamp_recv_mri / 1e6
-                + self.lookahead_time
+                + self.lookahead_time  # this should be MLC adaptation latency
             )
+
+            # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
+            #latency_sam_lstm_ms = (
+            #    datetime.datetime.now().timestamp() * 1000
+            #    - self.prediction_done_timestamp * 1000
+            #    + self.lookahead_time   # this should be end-to-end latency
+            #)
+
+
             print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")
             interpolation_point = latency_sam_lstm_ms/ 1000 * self.img_frequency # ms -> prediction steps
             if interpolation_point > 4:
@@ -491,7 +500,7 @@ class predictor:
                             
             
             if self.logging:
-                with open('/utrecht_exp/pred_log_file.txt', 'a') as f:
+                with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'a') as f:
                     f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
 
             next_time += period

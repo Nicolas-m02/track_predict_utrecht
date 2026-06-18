@@ -277,4 +277,4 @@ async def startup_event():
     asyncio.create_task(receive_images())
     asyncio.create_task(receive_predictions())
     asyncio.create_task(periodic_broadcast())
-    asyncio.create_task(send_clicks())
+    #asyncio.create_task(send_clicks())

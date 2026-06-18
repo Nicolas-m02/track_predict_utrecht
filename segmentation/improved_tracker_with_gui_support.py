@@ -61,11 +61,11 @@ def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
     cy = (mask * y).sum() / total
     cx = (mask * x).sum() / total
 
-    dy_px = cy - img_size_px/2
-    dx_px = cx - img_size_px/2
+    dy_px = cy - img_size_px // 2
+    dx_px = cx - img_size_px // 2
 
     dx_mm = dx_px * voxel_size_mm
-    dy_mm = -dy_px * voxel_size_mm
+    dy_mm = - dy_px * voxel_size_mm      # changed direction to comply with motion of phantom
 
 
     return torch.stack([dx_mm, dy_mm])
@@ -75,14 +75,14 @@ def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
 class ReceiveImages:
     # Init functions to set up queues, SAM, connections
 
-    def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0,send_timestamps=False):
+    def __init__(self, image_dimensions=(128,128),send_data=False,protocol='tcp',max_queue_size=0,send_timestamps=False):
         #self.seen_images = []
 
          # Receiving data params
-        self.zmq_prot = True
-        self.emulation = False
-        self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
-        self.emu_path = "/utrecht_data/20260323/tmp"
+        self.zmq_prot = False
+        self.emulation = True
+        #self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
+        self.emu_path = "/utrecht_data/20260616/dat_imgs/"
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -103,7 +103,7 @@ class ReceiveImages:
         self.send_timestamps = send_timestamps
         self.protocol = protocol
 
-        self.MRTC_prot = True
+        self.MRTC_prot = False
         self.mrtc_port = mrtc_port 
         self.stack_update_host = stack_update_host
         self.stack_update_port = stack_update_port   
@@ -127,11 +127,15 @@ class ReceiveImages:
         # logging 
         self.logging = True
         if self.logging:
-            with open("/utrecht_exp/logs/receive_images_enter.txt", 'w') as f:
+            self.time_logging = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+            self.receive_images_enter_log = (f"/utrecht_exp/logs/receive_images_enter_{self.time_logging}.txt")
+            self.receive_images_exit_log = (f"/utrecht_exp/logs/receive_images_exit_{self.time_logging}.txt")
+
+            with open(self.receive_images_enter_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
-            with open("/utrecht_exp/logs/receive_images_exit.txt", 'w') as f:
-                f.write(f"Log file created at {datetime.datetime.now()}\n\n")
-            with open("/utrecht_exp/logs/gui_sent.txt", 'w') as f:
+
+            with open(self.receive_images_exit_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
 
     def connect(self, host=host_rec, port=port_rec):
@@ -205,7 +209,6 @@ class ReceiveImages:
 
                 # receive message
                 msg = self.conn.recv()
-
                 # find beginning of binary image data
                 sep = b"DATA\n"
 
@@ -261,7 +264,7 @@ class ReceiveImages:
                     await self.seen_images_queue.put(img_array)
 
                 if self.logging:
-                    with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                    with open(f"/utrecht_exp/logs/receive_images_enter{self.time_logging}.txt", 'a') as f:
                         f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
 
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
@@ -274,14 +277,14 @@ class ReceiveImages:
                 if image is not None:
 
                     self.current_angle = int(np.round(math.degrees(math.atan2(image['row_direction_cosines'][1], image['row_direction_cosines'][0]))))
-
+                    print(f"Current angle: {self.current_angle}")
                     if self.send_timestamps:
                         await self.seen_images_queue.put((image['data'], image['timestamp']))
                     else:
                         await self.seen_images_queue.put(image['data'])
                     #print(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}")
                     if self.logging:
-                        with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                        with open(f"/utrecht_exp/logs/receive_images_enter{self.time_logging}.txt", 'a') as f:
                             f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
                 await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
@@ -313,9 +316,9 @@ class ReceiveImages:
                     await self.seen_images_queue.put(img_array)
 
                     if self.logging:
-                        with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                        with open(f"/utrecht_exp/logs/receive_images_enter{self.time_logging}.txt", 'a') as f:
                             f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
-
+                #print(f"Number of seen images: {len(self.seen_images)}")
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
                 
 
@@ -325,8 +328,6 @@ class ReceiveImages:
                 image, timestamp = await self.seen_images_queue.get()
             else:
                 image = await self.seen_images_queue.get()
-            
-
             prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
             
             if self.send_timestamps:
@@ -370,6 +371,7 @@ class ReceiveImages:
                                     print(f"No prompt found for angle {self.current_angle}, using default prompt")
                                     _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.last_angle)])
                                 else:
+                                    print(f"Using prompt for angle {self.current_angle}")
                                     _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.current_angle)])
                                 self.last_angle = self.current_angle
 
@@ -381,8 +383,8 @@ class ReceiveImages:
                                 self.masks_queue.put_nowait((out_mask, timestamp))
                             else:
                                 self.masks_queue.put_nowait(out_mask)
-                                                
-                            #print("First frame processed, starting tracking...")
+
+                            print("First frame processed, starting tracking...")
                             end_time_sam = time.time()
                             print(f"Time taken to process angle change with SAM: {end_time_sam - start_time_sam:.4f} seconds")
                             self.gui_queue.put_nowait((image, out_mask))
@@ -439,9 +441,9 @@ class ReceiveImages:
                     self.send_socket.send(value)
 
                     if self.logging:
-                        with open("/utrecht_exp/logs/receive_images_exit.txt", 'a') as f:
+                        with open(f"/utrecht_exp/logs/receive_images_exit{self.time_logging}.txt", 'a') as f:
                             f.write(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}\n")
-
+                await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
     # GUI main function 
 
     async def send_im_and_mask_to_gui(self):
@@ -451,9 +453,7 @@ class ReceiveImages:
             return np.array(largest_contour)[:,0,:]
 
         while True:
-            start_time = time.time()
             
-            receiving_time_start = time.time()
             image, mask = await self.gui_queue.get()
 
             image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -492,7 +492,8 @@ class ReceiveImages:
             #print(f"Sent image to GUI in {sending_time_end - sending_time_start:.4f} seconds")
             end_time = time.time()
             #print(f"Sent image and mask to GUI in {end_time - start_time:.4f} seconds")
-            with open("/utrecht_exp/logs/gui_sent.txt", 'a') as f:
+            
+            with open(f"/utrecht_exp/logs/gui_sent{self.time_logging}.txt", 'a') as f:
                 f.write(f"Sent image and mask for frame {self.frame_no} to GUI at {datetime.datetime.now()}\n")
 
     # One time use functions
@@ -536,7 +537,7 @@ class ReceiveImages:
 print("Initializing improved tracking module with gui support...")
 async def main():
     image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128),send_timestamps=True)
-    image_receiver.initialize_prompt(prompt_library_path="/utrecht_exp/segmentation/prompt_library/prompts_circle/")
+    image_receiver.initialize_prompt(prompt_library_path="/utrecht_exp/segmentation/prompt_library/fiducial_segmented/")
     image_receiver.connect_send(host=host_send, port=port_send)
     image_receiver.connect_to_gui(host=host_gui, port=port_gui)
     image_receiver.connect(host=host_rec, port=port_rec)

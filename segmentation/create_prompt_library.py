@@ -10,18 +10,18 @@ import SimpleITK as sitk
 import pymri
 import time
 
-emu_path = "/utrecht_data/20260323/tmp/"
-
-#handler = pymri.QueuedImageHandler()
-#recv = pymri.EmuImageReceiver.create(emu_path, handler)
-
-#MRTC Receiver configs
-mrtc_port = 4005 # receiving images from MR
-stack_update_host = '0.0.0.0'
-stack_update_port = 54323   # controlling the MR
+emu_path = "/utrecht_data/20260616/dat_imgs/"
 
 handler = pymri.QueuedImageHandler()
-recv = pymri.MRTCImageReceiver.create(mrtc_port, stack_update_host, stack_update_port, handler, False) 
+recv = pymri.EmuImageReceiver.create(emu_path, handler)
+
+#MRTC Receiver configs
+#mrtc_port = 4005 # receiving images from MR
+#stack_update_host = '0.0.0.0'
+#stack_update_port = 54323   # controlling the MR
+
+#handler = pymri.QueuedImageHandler()
+#recv = pymri.MRTCImageReceiver.create(mrtc_port, stack_update_host, stack_update_port, handler, False) 
 
 
 
@@ -29,7 +29,7 @@ all_images = []
 
 
 
-os.makedirs("/utrecht_exp/segmentation/prompt_library/tmp_hapkin", exist_ok=True)
+os.makedirs("/utrecht_exp/segmentation/prompt_library/fiducial_img", exist_ok=True)
 
 print("Receiving images...")
 counter = 0
@@ -58,7 +58,7 @@ while True:
 
         if counter >= 20:
             print("Saved image")
-            sitk.WriteImage(sitk.GetImageFromArray(image_data), f"/utrecht_exp/segmentation/prompt_library/tmp_hapkin/image_{direction_cosines}.mha")
+            sitk.WriteImage(sitk.GetImageFromArray(image_data), f"/utrecht_exp/segmentation/prompt_library/fiducial_img/image_{direction_cosines}.mha")
             counter = 0
             latest = None
             
@@ -98,7 +98,7 @@ import matplotlib.pyplot as plt
 import SimpleITK as sitk
 
 
-im = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/segmentation/prompt_library/tmp_hapkin/image_90.mha"))
+im = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/segmentation/prompt_library/fiducial_test/image_90.mha"))
 
 plt.figure()
 plt.imshow(im, cmap="gray")
