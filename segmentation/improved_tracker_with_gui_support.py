@@ -15,11 +15,11 @@ import torch
 
 host_rec = '0.0.0.0' 
 port_rec = 6056
-host_send = 'utrecht_prediction_01'
+host_send = 'prediction_container'
 port_send = 9002
 
 # Gui configs
-host_gui = 'utrecht_gui_02'
+host_gui = 'gui_container'
 port_gui = 7000
 
 #MRTC Receiver configs
@@ -80,9 +80,9 @@ class ReceiveImages:
 
          # Receiving data params
         self.zmq_prot = True
-        self.emulation = True
+        self.emulation = False
         self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
-
+        self.emu_path = "/utrecht_data/20260323/tmp"
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -103,7 +103,7 @@ class ReceiveImages:
         self.send_timestamps = send_timestamps
         self.protocol = protocol
 
-        self.MRTC_prot = False
+        self.MRTC_prot = True
         self.mrtc_port = mrtc_port 
         self.stack_update_host = stack_update_host
         self.stack_update_port = stack_update_port   

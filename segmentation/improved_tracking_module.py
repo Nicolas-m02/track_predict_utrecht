@@ -13,6 +13,10 @@ import math
 os.chdir("/utrecht_exp/segmentation/")
 import torch
 
+
+
+
+
 host_rec = '0.0.0.0' 
 port_rec = 6056
 host_send = 'prediction_container'
@@ -58,11 +62,11 @@ def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
     cy = (mask * y).sum() / total
     cx = (mask * x).sum() / total
 
-    dy_px = cy - img_size_px/2
-    dx_px = cx - img_size_px/2
+    dy_px = cy - img_size_px // 2
+    dx_px = cx - img_size_px // 2
 
     dx_mm = dx_px * voxel_size_mm
-    dy_mm = -dy_px * voxel_size_mm
+    dy_mm = - dy_px * voxel_size_mm      # changed direction to comply with motion of phantom
 
 
     return torch.stack([dx_mm, dy_mm])
@@ -121,9 +125,15 @@ class ReceiveImages:
         # logging 
         self.logging = True
         if self.logging:
-            with open("/utrecht_exp/logs/receive_images_enter.txt", 'w') as f:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+            self.receive_images_enter_log = (f"/utrecht_exp/logs/receive_images_enter_{timestamp}.txt")
+            self.receive_images_exit_log = (f"/utrecht_exp/logs/receive_images_exit_{timestamp}.txt")
+
+            with open(self.receive_images_enter_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
-            with open("/utrecht_exp/logs/receive_images_exit.txt", 'w') as f:
+
+            with open(self.receive_images_exit_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
 
     def connect(self, host=host_rec, port=port_rec):
@@ -190,8 +200,8 @@ class ReceiveImages:
             while True:
 
                 # receive message
+                print("message received")
                 msg = self.conn.recv()
-
                 # find beginning of binary image data
                 sep = b"DATA\n"
 
@@ -313,7 +323,7 @@ class ReceiveImages:
             else:
                 image = await self.seen_images_queue.get()
             
-
+            print("image received")
             prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
             
             if self.send_timestamps:
@@ -425,7 +435,7 @@ class ReceiveImages:
                         else:
                             value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
                     self.send_socket.send(value)
-
+                    print(f"new COM at {tstamp_send} and is {new_com}")
                     if self.logging:
                         with open("/utrecht_exp/logs/receive_images_exit.txt", 'a') as f:
                             f.write(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}\n")
