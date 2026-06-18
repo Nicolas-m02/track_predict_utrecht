@@ -96,8 +96,8 @@ log_file_path = "/utrecht_exp/gui/stream_log.txt"
 with open(log_file_path, "w") as log_file:
     log_file.write("frame,byte_time,total_time\n")
 
-height, width = 112,112
-# height, width = 128,128
+# height, width = 112,112
+height, width = 128,128
 current_frame = 0
 latest_frame = None
 latest_value = None
@@ -285,4 +285,4 @@ async def startup_event():
     asyncio.create_task(receive_images())
     asyncio.create_task(receive_predictions())
     asyncio.create_task(periodic_broadcast())
-    asyncio.create_task(send_clicks())
+    #asyncio.create_task(send_clicks())
