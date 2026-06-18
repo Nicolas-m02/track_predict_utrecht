@@ -63,7 +63,7 @@ class ReceiveImages:
         #self.seen_images = []
 
          # Receiving data params
-        self.emulation = False
+        self.emulation = True
         self.emu_path = "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
 
         self.image_dimensions = image_dimensions
@@ -71,7 +71,8 @@ class ReceiveImages:
         # Click params
         self.click_received = False
         self.click_coordinates = None
-
+        self.mask_received = False
+        self.mask_data = None
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -223,13 +224,13 @@ class ReceiveImages:
         while True: 
             image = await self.preprocessed_images_queue.get()
             
-            if self.click_received:
+            if (self.click_received or self.mask_received) or self.frame_no != 0:
                 self.frame_no += 1
-
+                print(self.frame_no)
                 with torch.inference_mode():
                         with torch.autocast('cuda', dtype=self.downcast_dtype):
                             
-                            if self.frame_no == 1: 
+                            if self.frame_no == 1 or (self.click_received or self.mask_received): 
                                 print(f"Initializing SAM {sam_type} with the first frame and prompt")
 
                                 start_time_sam = time.time()
@@ -238,7 +239,12 @@ class ReceiveImages:
 
                                 # _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.prompt)
 
-                                _,_, out_mask_logits = self.predictor.add_new_points(frame_idx=0, obj_id=0, points=np.array([self.click_coordinates]), labels=np.array([1]))
+                                if self.click_received:
+                                    _,_, out_mask_logits = self.predictor.add_new_points(frame_idx=0, obj_id=0, points=np.array([self.click_coordinates]), labels=np.array([1]))
+                                    self.click_received = False  # Reset click received flag after processing
+                                elif self.mask_received:
+                                    _,_, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.mask_data)
+                                    self.mask_received = False  # Reset mask received flag after processing
 
                                 out_mask = out_mask_logits>sam_mask_threshold
                                 self.out_masks.append(out_mask)  # Store the first mask for later saving
@@ -249,7 +255,7 @@ class ReceiveImages:
                                 print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
                                 self.gui_queue.put_nowait((image, out_mask))
                             else:
-                                #print("Tracking new frame...")
+                                print("Tracking new frame...")
                                 _, out_mask_logits = self.predictor.track(image)
                                 out_mask = out_mask_logits>sam_mask_threshold
                                 self.out_masks.append(out_mask)  # Store the first mask for later saving
@@ -317,7 +323,7 @@ class ReceiveImages:
             #print(f"Received image and mask from queues in {receiving_time_end - receiving_time_start:.4f} seconds")
             try:
                 contour_time_start = time.time()
-                image = cv2.drawContours(image.copy(), [compute_largest_contour(mask.cpu().numpy().squeeze().astype(np.uint8)*255)], -1, (0,255,0), 1)
+                image = cv2.drawContours(image.copy(), [compute_largest_contour(mask.cpu().numpy().squeeze().astype(np.uint8)*255)], -1, (255,255,255), 1)
                 contour_time_end = time.time()
                 #print(f"Time taken to compute largest contour: {contour_time_end - contour_time_start:.4f} seconds")
             except Exception as e:
@@ -366,15 +372,46 @@ class ReceiveImages:
 
             try:
                 data = await asyncio.wait_for(
-                    loop.sock_recv(self.clicks_socket, 8),
+                    loop.sock_recv(self.clicks_socket, 1),
                     timeout=0.001
                 )
 
                 if data:
-                    self.click_received = True
-                    x, y = struct.unpack('2f', data)
-                    self.click_coordinates = (x, y)
-                    print(f"Received click at coordinates: ({x}, {y})")
+                    msg_type = struct.unpack('B', data)[0]
+                    
+                    if msg_type == 0:  # Click
+                        click_data = await asyncio.wait_for(
+                            loop.sock_recv(self.clicks_socket, 8),
+                            timeout=0.001
+                        )
+                        if click_data:
+                            self.click_received = True
+                            x, y = struct.unpack('2f', click_data)
+                            self.click_coordinates = (x, y)
+                            print(f"Received click at coordinates: ({x}, {y})")
+                    
+                    elif msg_type == 1:  # Mask
+                        header_data = await asyncio.wait_for(
+                            loop.sock_recv(self.clicks_socket, 8),
+                            timeout=0.001
+                        )
+                        if header_data:
+                            width, height = struct.unpack('!II', header_data)
+                            mask_size = width * height
+                            
+                            mask_data = await asyncio.wait_for(
+                                loop.sock_recv(self.clicks_socket, mask_size),
+                                timeout=0.1
+                            )
+                            if mask_data:
+                                self.mask_received = True
+                                mask_array = np.frombuffer(mask_data, dtype=np.uint8)
+                                mask_array = mask_array.reshape((height, width))
+                                self.mask_data = mask_array
+                                print(f"Received mask: {width}x{height}")
+                                print(f"Unique values in mask: {np.unique(mask_array)}")
+                                print(f"Mask data type: {mask_array.dtype}")
+                                print(f"Mask array shape: {mask_array.shape}")
 
             except asyncio.TimeoutError:
                 pass

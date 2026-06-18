@@ -507,7 +507,7 @@ class predictor:
     async def close_connection(self):
         self.conn.close()
         self.s.close()
-112
+
 # combine coroutines into single future
 async def main():
     prediction_instance = predictor(receive_timestamps=True,send_frequency=25)

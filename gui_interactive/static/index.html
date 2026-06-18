@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Streaming Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+        }
+
+        #viewer {
+            position: relative;
+            display: inline-block;
+            border: 1px solid #ccc;
+            margin-bottom: 1rem;
+        }
+
+        #frameCanvas,
+        #drawCanvas {
+            display: block;
+        }
+
+        #drawCanvas {
+            position: absolute;
+            left: 0;
+            top: 0;
+            cursor: crosshair;
+            touch-action: none;
+        }
+
+        #controls {
+            margin: 0.5rem 0 1rem;
+        }
+    </style>
+</head>
+<body>
+    <h2>Tracking Video Stream</h2>
+
+    <div id="controls">
+        <button id="pauseResumeBtn">Pause</button>
+        <button id="clearDrawing">Clear screen</button>
+        <button id="sendDrawing">Send prompt</button>
+        <span id="status"></span>
+    </div>
+
+    <div id="viewer">
+        <canvas id="frameCanvas"></canvas>
+        <canvas id="drawCanvas"></canvas>
+    </div>
+
+    <h2>Predictions</h2>
+    <canvas id="chart"></canvas>
+
+    <script>
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        const frameCanvas = document.getElementById('frameCanvas');
+        const drawCanvas = document.getElementById('drawCanvas');
+        const frameCtx = frameCanvas.getContext('2d');
+        const drawCtx = drawCanvas.getContext('2d');
+        const viewer = document.getElementById('viewer');
+        const clearDrawingBtn = document.getElementById('clearDrawing');
+        const pauseResumeBtn = document.getElementById('pauseResumeBtn');
+        const sendDrawingBtn = document.getElementById('sendDrawing');
+        const statusSpan = document.getElementById('status');
+
+        const displayScale = 4;
+        let drawing = false;
+        let hasMoved = false;
+        let lastPoint = null;
+        let frameSizeInitialized = false;
+        let isPaused = false;
+
+        function resizeCanvases(width, height) {
+            frameCanvas.width = width;
+            frameCanvas.height = height;
+            drawCanvas.width = width;
+            drawCanvas.height = height;
+
+            viewer.style.width = `${width * displayScale}px`;
+            viewer.style.height = `${height * displayScale}px`;
+
+            frameCanvas.style.width = `${width * displayScale}px`;
+            frameCanvas.style.height = `${height * displayScale}px`;
+            drawCanvas.style.width = `${width * displayScale}px`;
+            drawCanvas.style.height = `${height * displayScale}px`;
+        }
+
+        function canvasPointFromEvent(event) {
+            const rect = drawCanvas.getBoundingClientRect();
+            const scaleX = drawCanvas.width / rect.width;
+            const scaleY = drawCanvas.height / rect.height;
+
+            return {
+                x: (event.clientX - rect.left) * scaleX,
+                y: (event.clientY - rect.top) * scaleY
+            };
+        }
+
+        function drawDot(point) {
+            drawCtx.beginPath();
+            drawCtx.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
+            drawCtx.fillStyle = 'red';
+            drawCtx.fill();
+        }
+
+        drawCanvas.addEventListener('pointerdown', (event) => {
+            drawing = true;
+            hasMoved = false;
+            drawCanvas.setPointerCapture(event.pointerId);
+
+            lastPoint = canvasPointFromEvent(event);
+            drawCtx.beginPath();
+            drawCtx.moveTo(lastPoint.x, lastPoint.y);
+        });
+
+        drawCanvas.addEventListener('pointermove', (event) => {
+            if (!drawing) {
+                return;
+            }
+
+            const point = canvasPointFromEvent(event);
+            hasMoved = true;
+
+            drawCtx.lineTo(point.x, point.y);
+            drawCtx.strokeStyle = 'red';
+            drawCtx.lineWidth = 2;
+            drawCtx.lineCap = 'round';
+            drawCtx.lineJoin = 'round';
+            drawCtx.stroke();
+
+            lastPoint = point;
+        });
+
+        function finishDrawing(event) {
+            if (!drawing) {
+                return;
+            }
+
+            drawing = false;
+            if (drawCanvas.hasPointerCapture(event.pointerId)) {
+                drawCanvas.releasePointerCapture(event.pointerId);
+            }
+
+            if (!hasMoved && lastPoint && !isPaused) {
+                drawDot(lastPoint);
+                ws.send(JSON.stringify({
+                    type: "click",
+                    x: Math.round(lastPoint.x),
+                    y: Math.round(lastPoint.y)
+                }));
+            }
+        }
+
+        drawCanvas.addEventListener('pointerup', finishDrawing);
+        drawCanvas.addEventListener('pointerleave', finishDrawing);
+
+        pauseResumeBtn.addEventListener('click', () => {
+            isPaused = !isPaused;
+            pauseResumeBtn.textContent = isPaused ? 'Resume' : 'Pause';
+            statusSpan.textContent = isPaused ? ' (paused)' : '';
+        });
+
+        clearDrawingBtn.addEventListener('click', () => {
+            drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        });
+
+        sendDrawingBtn.addEventListener('click', () => {
+            const drawingImageData = drawCtx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
+            const data = drawingImageData.data;
+            
+            // Create binary mask: 1 where red pixels exist, 0 elsewhere
+            const mask = new Uint8Array(drawCanvas.width * drawCanvas.height);
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const a = data[i + 3];
+                
+                // If pixel has any opacity and is reddish, mark as 1
+                if (a > 128 && r > 100) {
+                    mask[i / 4] = 1;
+                }
+            }
+            
+            // Convert to base64 for transmission
+            const maskB64 = btoa(String.fromCharCode.apply(null, mask));
+            
+            ws.send(JSON.stringify({
+                type: "drawing_mask",
+                mask: maskB64,
+                width: drawCanvas.width,
+                height: drawCanvas.height
+            }));
+            
+            statusSpan.textContent = ' (sent)';
+            setTimeout(() => {
+                statusSpan.textContent = isPaused ? ' (paused)' : '';
+            }, 2000);
+        });
+
+        const ctx = document.getElementById('chart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Predicted Value',
+                    data: []
+                }]
+            }
+        });
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (isPaused) {
+                return;
+            }
+
+            const image = new Image();
+            image.onload = () => {
+                if (!frameSizeInitialized) {
+                    resizeCanvases(image.naturalWidth, image.naturalHeight);
+                    frameSizeInitialized = true;
+                }
+
+                frameCtx.clearRect(0, 0, frameCanvas.width, frameCanvas.height);
+                frameCtx.drawImage(image, 0, 0, frameCanvas.width, frameCanvas.height);
+            };
+            image.src = 'data:image/jpeg;base64,' + data.frame;
+
+            chart.data.labels.push(data.t);
+            chart.data.datasets[0].data.push(data.value);
+
+            if (chart.data.labels.length > 200) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+
+            chart.update('none');
+        };
+    </script>
+</body>
+</html>
