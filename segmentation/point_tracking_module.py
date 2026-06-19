@@ -11,6 +11,7 @@ import asyncio
 import matplotlib.pyplot as plt
 os.chdir("/utrecht_exp/segmentation/")
 import torch
+import math 
 
 #host_rec = 'localhost' 
 #port_rec = 1220
@@ -20,10 +21,12 @@ port_rec = 6056
 host_send = 'prediction_container'
 port_send = 9002
 # Gui configs
-host_gui = 'gui_container'
+host_gui = 'gui_container_local' # online testing
+# host_gui ='gui_container' # offline testing
 port_gui = 7000
 
-host_clicks = 'gui_container'
+host_clicks = 'gui_container_local' # online testing
+# host_clicks ='gui_container' # offline testing
 port_clicks = 8000
 
 #MRTC Receiver configs
@@ -50,7 +53,7 @@ elif sam_type == "tiny":
 
 from sam2.build_sam import build_sam2_camera_predictor
 
-testing = True
+testing = False
 
 from scipy.ndimage import center_of_mass
 
@@ -78,7 +81,7 @@ def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
 class ReceiveImages:
     # Init functions to set up queues, SAM, connections
 
-    def __init__(self, image_dimensions=(128,128),send_data=False,protocol='tcp',max_queue_size=20):
+    def __init__(self, image_dimensions=(128,128),send_data=False,protocol='tcp',max_queue_size=20,send_timestamps=False):
         #self.seen_images = []
 
          # Receiving data params
@@ -381,8 +384,6 @@ class ReceiveImages:
 
                                 self.predictor.load_first_frame(image)
 
-                                # _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.prompt)
-
                                 if self.click_received:
                                     _,_, out_mask_logits = self.predictor.add_new_points(frame_idx=0, obj_id=0, points=np.array([self.click_coordinates]), labels=np.array([1]))
                                     self.click_received = False  # Reset click received flag after processing
@@ -392,19 +393,30 @@ class ReceiveImages:
 
                                 out_mask = out_mask_logits>sam_mask_threshold
                                 self.out_masks.append(out_mask)  # Store the first mask for later saving
-                                self.masks_queue.put_nowait(out_mask)
-                            
+                                
+                                if self.send_timestamps:
+                                    self.masks_queue.put_nowait((out_mask,timestamp))
+                                else:
+                                    self.masks_queue.put_nowait(out_mask)                            
+                                
                                 print("First frame processed, starting tracking...")
                                 end_time_sam = time.time()
                                 print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
                                 self.gui_queue.put_nowait((image, out_mask))
                             else:
                                 print("Tracking new frame...")
-                                _, out_mask_logits = self.predictor.track(image)
-                                out_mask = out_mask_logits>sam_mask_threshold
-                                self.out_masks.append(out_mask)  # Store the first mask for later saving
 
-                                self.masks_queue.put_nowait(out_mask)
+                                
+                                _, out_mask_logits = self.predictor.track(image)
+                                
+                                out_mask = out_mask_logits>sam_mask_threshold
+                                
+                                self.out_masks.append(out_mask)  # Store the first mask for later saving
+                                
+                                if self.send_timestamps:
+                                    self.masks_queue.put_nowait((out_mask,timestamp))
+                                else:
+                                    self.masks_queue.put_nowait(out_mask)
                                 self.gui_queue.put_nowait((image, out_mask))
 
             else:
@@ -585,11 +597,6 @@ class ReceiveImages:
 
     # One time use functions
 
-    def initialize_prompt(self):
-        if testing:
-            import SimpleITK as sitk
-            self.prompt = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/data/prompt.mha"))[0]
-            print('Initialized prompt')
 
     def close_connection(self):
         self.conn.close()
@@ -608,7 +615,6 @@ class ReceiveImages:
 print("Initializing improved tracking module with gui support...")
 async def main():
     image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128),send_timestamps=True)
-    image_receiver.initialize_prompt()
     image_receiver.connect(host=host_rec, port=port_rec)
     image_receiver.connect_send(host=host_send, port=port_send)
     image_receiver.connect_to_gui(host=host_gui, port=port_gui)

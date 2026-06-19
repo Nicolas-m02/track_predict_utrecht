@@ -27,7 +27,8 @@ testing = False
 host_send = '0.0.0.0'
 port_send = 9003
 
-host_gui = 'gui_container'
+# host_gui = 'gui_container'
+host_gui = 'gui_container_local'
 port_gui = 7005 # Tracker is 7000
 
 

@@ -19,7 +19,8 @@ host_send = 'prediction_container'
 port_send = 9002
 
 # Gui configs
-host_gui = 'gui_container'
+host_gui = 'gui_container_local' # online testing
+# host_gui ='gui_container' # offline testing
 port_gui = 7000
 
 #MRTC Receiver configs
