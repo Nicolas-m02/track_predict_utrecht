@@ -8,11 +8,18 @@ import torch
 import torch.nn as nn
 import struct
 import numpy as np
-import datetime
 import PositionServer_pb2 as ps
 
 host = "0.0.0.0"
 port = 9002  
+
+#port = 6055 
+# ######################## watch out: 
+# if directly connect to mrtc then port 4005 should be exposed 
+# (right now done so with SAM container, need to be changed!) 
+
+# change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
+
 testing = False
 
 host_send = '0.0.0.0'
@@ -146,6 +153,7 @@ class predictor:
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
         self.no_prediction = False
+        self.connect_to_mrtc = False
         self.logging = True
         self.first_data_point_received = False
 
@@ -159,6 +167,7 @@ class predictor:
         self.previous_prediction = None
         self.latest_timestamp_recv_mri = None
         self.previous_timestamp_recv_mri = None
+        self.prediction_done_timestamp = None
         self.lookahead_time = 250 #ms
         self.prediction_lock = threading.Lock()
 
@@ -183,27 +192,41 @@ class predictor:
         print('Warmed up LSTM model with dummy data.')
 
         if self.logging:
-            self.log_file = '/utrecht_exp/logs/online_log.txt'
-            with open(self.log_file, 'w') as f:
+            self.time_logging = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'w') as f:
                 f.write('Online optimization log\n')
                 f.write('=======================\n')
 
-            with open('/utrecht_exp/logs/online_received.txt', 'w') as f:
+            with open(f'/utrecht_exp/logs/online_received_{self.time_logging}.txt', 'w') as f:
                 f.write('Online received data log\n')
                 f.write('=======================\n')
 
-            with open('/utrecht_exp/pred_log_file.txt', 'w') as f:
+            with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'w') as f:
                 f.write('Predictions \n')
                 f.write('=======================\n')
 
+        if self.no_prediction: 
+            print("Running with no prediction")
+
+
     def connect(self,host=host, port=port): # receiver
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.s.bind((host, port))
-        self.s.listen(1)
-        print("Server listening...")
-        self.conn, self.addr = self.s.accept()
-        print("Connected by", self.addr)
+
+        if self.connect_to_mrtc:
+            import zmq
+            self.context = zmq.Context()
+            self.socket = self.context.socket(zmq.SUB)
+            self.socket.bind(f"tcp://{host}:{port}")
+            self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
+            print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
+            self.conn = self.socket
+        else:
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.s.bind((host, port))
+            self.s.listen(1)
+            print("Server listening...")
+            self.conn, self.addr = self.s.accept()
+            print("Connected by", self.addr)   
 
     def connect_sender(self,host=host_send, port=port_send): # sender
         if self.send_frequency is not None:
@@ -220,25 +243,45 @@ class predictor:
     async def receive_data(self):
         while True:
             try:
-                if self.receive_timestamps:
-                    
-                    SIZE = struct.calcsize('2fQ')
+                if  self.connect_to_mrtc:
 
-                    buf = b''
-                    while len(buf) < SIZE:
-                        chunk = self.conn.recv(SIZE - len(buf))
-                        if not chunk:
-                            print("socket closed")
-                            sys.exit()
-                        buf += chunk
+                    msg = self.conn.recv()
 
-                    x, y, timestamp_ns = struct.unpack('2fQ', buf)
-                    data = torch.tensor([x,y]).to(device)
-                    self.new_data_queue.put_nowait((data, timestamp_ns))
+                    env = ps.Envelope()
+                    env.ParseFromString(msg)
+
+                    rep = ps.LetterRep()
+                    rep.ParseFromString(env.payload)
+
+                    v = ps.Vector()
+                    v.ParseFromString(rep.payload)
+
+                    data = torch.tensor([v.x, v.y], device=device)
+                    print(data)
+                    print("WARNING: no timestamp detected")
+                    timestamp_ns = time.time_ns()                        # timestamp not sent in msg therefore create timestamp when receiving motion
+                    self.new_data_queue.put_nowait((data, timestamp_ns))       
 
                 else:
-                    data = torch.tensor(struct.unpack('2f', self.conn.recv(1024))).to(device)
-                    self.new_data_queue.put_nowait((data, timestamp_ns))
+                    if self.receive_timestamps:
+                        
+                        SIZE = struct.calcsize('2fQ')
+
+                        buf = b''
+                        while len(buf) < SIZE:
+                            chunk = self.conn.recv(SIZE - len(buf))
+                            if not chunk:
+                                raise ConnectionError("socket closed")
+                            buf += chunk
+
+                        x, y, timestamp_ns = struct.unpack('2fQ', buf)
+                        #print(f"Received data: x={x}, y={y}, timestamp={timestamp_ns}")
+                        data = torch.tensor([x,y]).to(device)
+                        self.new_data_queue.put_nowait((data, timestamp_ns))
+
+                    else:
+                        data = torch.tensor(struct.unpack('2f', self.conn.recv(1024))).to(device)
+                        self.new_data_queue.put_nowait((data, timestamp_ns))
 
             except Exception as e:
                 print(f"Error occurred: {e}")
@@ -262,7 +305,7 @@ class predictor:
                 self.true_history.append(data.cpu().numpy())
 
                 if self.logging:
-                    with open('/utrecht_exp/logs/online_received.txt', 'a') as f:
+                    with open(f'/utrecht_exp/logs/online_received_{self.time_logging}.txt', 'a') as f:
                         f.write(f"Received data: {data.cpu().numpy()} at {datetime.datetime.now()}\n")
                 self.current_data_point += 1
 
@@ -280,8 +323,6 @@ class predictor:
                 if len(self.seen_data) >= self.input_size:
                     #print("Seen data:", self.seen_data)
                     self.lstm_model.eval()
-
-
                     
                     input_data,orig_scale = better_manual_scaler(self.seen_data, [-1,1])
                     
@@ -305,6 +346,8 @@ class predictor:
                                 if self.no_prediction:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = data.cpu().numpy().copy()
+                                    self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
+                                    self.latest_timestamp_recv_mri = timestamp_recv_mri
                                 else:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()
@@ -319,9 +362,10 @@ class predictor:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()                        
                         self.current_prediction_point += 1
+                        self.prediction_done_timestamp = datetime.datetime.now().timestamp()
 
                         if self.logging:
-                            with open(self.log_file, 'a') as f:
+                            with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'a') as f:
                                 f.write(f"Prediction: {output[-1,:]} at {datetime.datetime.now()}\n")
                                 
 
@@ -361,10 +405,9 @@ class predictor:
 
     def interpolate_prediction(self, prediction,interpolation_point):
         # prediction is shape (4,2), no prediction is shape (2,)
-        new_prediction = np.zeros(3)
+        new_prediction = np.zeros(2)
         new_prediction[0] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,0])
         new_prediction[1] = np.interp(interpolation_point, np.arange(1, 5, 1), prediction[:,1])  
-        new_prediction[2] = 0
         return new_prediction
 
     def send_prediction_loop(self):
@@ -412,12 +455,21 @@ class predictor:
                     timestamp_recv_mri = self.previous_timestamp_recv_mri
                     prediction = self.previous_prediction
 
-
+            # Variant A: Get time between MRI and current, and add the time that the MLCs need to get to this position
             latency_sam_lstm_ms = (
                 datetime.datetime.now().timestamp() * 1000
                 - timestamp_recv_mri / 1e6
-                + self.lookahead_time
+                + self.lookahead_time  # this should be MLC adaptation latency
             )
+
+            # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
+            #latency_sam_lstm_ms = (
+            #    datetime.datetime.now().timestamp() * 1000
+            #    - self.prediction_done_timestamp * 1000
+            #    + self.lookahead_time   # this should be end-to-end latency
+            #)
+
+
             print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")
             interpolation_point = latency_sam_lstm_ms/ 1000 * self.img_frequency # ms -> prediction steps
             if interpolation_point > 4:
@@ -427,14 +479,14 @@ class predictor:
                 interpolated_prediction_mm = prediction
             else:
                 interpolated_prediction_mm = self.interpolate_prediction(prediction, interpolation_point)
-
             # create and send message
             vec = ps.Vector()
             arr = np.asarray(interpolated_prediction_mm).reshape(-1)
+            print(f"Prediction: {timestamp_recv_mri} at {arr}")
 
             vec.x = float(arr[0])
             vec.y = float(arr[1])
-            vec.z = float(arr[2])
+            vec.z = float(0)
 
 
             print(datetime.datetime.now(),' current predcition x y z ',vec.x,' ',vec.y,' ',vec.z)
@@ -448,7 +500,7 @@ class predictor:
                             
             
             if self.logging:
-                with open('/utrecht_exp/pred_log_file.txt', 'a') as f:
+                with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'a') as f:
                     f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
 
             next_time += period

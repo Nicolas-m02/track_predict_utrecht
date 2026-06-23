@@ -13,16 +13,20 @@ import math
 os.chdir("/utrecht_exp/segmentation/")
 import torch
 
+
+
+
+
 host_rec = '0.0.0.0' 
 port_rec = 6056
 host_send = 'prediction_container'
 port_send = 9002
 
 
+#MRTC Receiver configs
 mrtc_port = 4005 # receiving images from MR
 stack_update_host = '0.0.0.0'
 stack_update_port = 54323   # controlling the MR
-
 
 
 # SAM2 Configs
@@ -58,11 +62,11 @@ def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
     cy = (mask * y).sum() / total
     cx = (mask * x).sum() / total
 
-    dy_px = cy - img_size_px/2
-    dx_px = cx - img_size_px/2
+    dy_px = cy - img_size_px // 2
+    dx_px = cx - img_size_px // 2
 
     dx_mm = dx_px * voxel_size_mm
-    dy_mm = -dy_px * voxel_size_mm
+    dy_mm = - dy_px * voxel_size_mm      # changed direction to comply with motion of phantom
 
 
     return torch.stack([dx_mm, dy_mm])
@@ -72,13 +76,15 @@ def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
 class ReceiveImages:
     # Init functions to set up queues, SAM, connections
 
-    def __init__(self, image_dimensions=(112,112),send_data=False,protocol='tcp',max_queue_size=0,send_timestamps=False):
+    def __init__(self, image_dimensions=(128,128),send_data=False,protocol='tcp',max_queue_size=0,send_timestamps=False):
         #self.seen_images = []
         
 
-        self.zmq_prot = True
-        self.emulation = False        
-        self.emu_path = "/utrecht_data/20260323/tmp/"
+         # Receiving data params
+        self.zmq_prot = False
+        self.emulation = True
+        #self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
+        self.emu_path = "/utrecht_data/20260616/dat_imgs/"
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -121,9 +127,15 @@ class ReceiveImages:
         # logging 
         self.logging = True
         if self.logging:
-            with open("/utrecht_exp/logs/receive_images_enter.txt", 'w') as f:
+            self.time_logging = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            self.receive_images_enter_log = (f"/utrecht_exp/logs/receive_images_enter_{self.time_logging}.txt")
+            self.receive_images_exit_log = (f"/utrecht_exp/logs/receive_images_exit_{self.time_logging}.txt")
+
+            with open(self.receive_images_enter_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
-            with open("/utrecht_exp/logs/receive_images_exit.txt", 'w') as f:
+
+            with open(self.receive_images_exit_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
 
     def connect(self, host=host_rec, port=port_rec):
@@ -191,7 +203,6 @@ class ReceiveImages:
 
                 # receive message
                 msg = self.conn.recv()
-
                 # find beginning of binary image data
                 sep = b"DATA\n"
 
@@ -247,7 +258,7 @@ class ReceiveImages:
                     await self.seen_images_queue.put(img_array)
 
                 if self.logging:
-                    with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                    with open(f"/utrecht_exp/logs/receive_images_enter_{self.time_logging}.txt", 'a') as f:
                         f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
 
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
@@ -265,9 +276,9 @@ class ReceiveImages:
                         await self.seen_images_queue.put((image['data'], image['timestamp']))
                     else:
                         await self.seen_images_queue.put(image['data'])
-                    print(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}")
+                    #print(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}")
                     if self.logging:
-                        with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                        with open(f"/utrecht_exp/logs/receive_images_enter_{self.time_logging}.txt", 'a') as f:
                             f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
                 await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
@@ -277,7 +288,7 @@ class ReceiveImages:
                 loop = asyncio.get_running_loop()
                 data = await loop.sock_recv(self.conn, 4)
                 if data is not None:
-                    print(f"Received data for frame {self.frame_no + 1} at {datetime.datetime.now()}")
+                    #print(f"Received data for frame {self.frame_no + 1} at {datetime.datetime.now()}")
                     start_time = time.time()
                     img_size = struct.unpack('!I', data)[0]
                     #print(img_size)
@@ -295,13 +306,12 @@ class ReceiveImages:
                     img_array = img_array.astype(np.uint16)  # Convert to uint8 for OpenCV processing
                     end_time = time.time()
                     #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
-                    print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
+                    #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
                     await self.seen_images_queue.put(img_array)
 
                     if self.logging:
-                        with open("/utrecht_exp/logs/receive_images_enter.txt", 'a') as f:
+                        with open(f"/utrecht_exp/logs/receive_images_enter{self.time_logging}.txt", 'a') as f:
                             f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
-
                 #print(f"Number of seen images: {len(self.seen_images)}")
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
                 
@@ -312,8 +322,6 @@ class ReceiveImages:
                 image, timestamp = await self.seen_images_queue.get()
             else:
                 image = await self.seen_images_queue.get()
-            
-
             prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
             
             if self.send_timestamps:
@@ -369,7 +377,7 @@ class ReceiveImages:
                                 self.masks_queue.put_nowait((out_mask, timestamp))
                             else:
                                 self.masks_queue.put_nowait(out_mask)
-                        
+
                             print("First frame processed, starting tracking...")
                             end_time_sam = time.time()
                             print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
@@ -425,9 +433,9 @@ class ReceiveImages:
                         else:
                             value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
                     self.send_socket.send(value)
-
+                    print(f"new COM at {tstamp_send} and is {new_com}")
                     if self.logging:
-                        with open("/utrecht_exp/logs/receive_images_exit.txt", 'a') as f:
+                        with open(f"/utrecht_exp/logs/receive_images_exit_{self.time_logging}.txt", 'a') as f:
                             f.write(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}\n")
 
     # One time use functions
@@ -485,18 +493,4 @@ async def main():
     )
 
 asyncio.run(main())
-
-
-
-
-#%%
-
-import torch
-
-torch.cuda.is_available()
-
-print(torch.cuda.get_device_name(1))
-print(torch.__version__)
-print(torch.cuda.device_count())
-
 

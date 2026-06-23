@@ -16,13 +16,29 @@ emu_path = "/utrecht_exp/data/single_file/20260622/"
 handler = pymri.QueuedImageHandler()
 recv = pymri.EmuImageReceiver.create(emu_path, handler)
 
+#MRTC Receiver configs
+#mrtc_port = 4005 # receiving images from MR
+#stack_update_host = '0.0.0.0'
+#stack_update_port = 54323   # controlling the MR
+
+#handler = pymri.QueuedImageHandler()
+#recv = pymri.MRTCImageReceiver.create(mrtc_port, stack_update_host, stack_update_port, handler, False) 
+
+
+
 all_images = []
 
-print(len(os.listdir(emu_path)))
 
 
+os.makedirs("/utrecht_exp/segmentation/prompt_library/fiducial_img", exist_ok=True)
 
 print("Receiving images...")
+counter = 0
+
+all_images_data = []
+all_cosines = []
+latest = None
+
 while True:
     image = handler.get_image()
 
@@ -57,7 +73,6 @@ for i in range(len(all_cosines)):
         plt.imshow(image, cmap='gray')
         plt.title(f"Image with angle {all_cosines[i]}")
         plt.axis('off')
-        plt.show()
         print(image.shape)
 
         sitk.WriteImage(sitk.GetImageFromArray(image), f"/utrecht_exp/segmentation/prompt_library/20260622/image_{all_cosines[i]}.mha")
@@ -68,4 +83,13 @@ for i in range(len(all_cosines)):
         pass
 
 #%%
-print(len(all_cosines))
+
+import matplotlib.pyplot as plt
+import SimpleITK as sitk
+
+
+im = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/segmentation/prompt_library/fiducial_test/image_90.mha"))
+
+plt.figure()
+plt.imshow(im, cmap="gray")
+
