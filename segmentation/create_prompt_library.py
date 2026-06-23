@@ -11,6 +11,7 @@ import pymri
 import time
 
 emu_path = "/utrecht_data/20260323/tmp/"
+emu_path = "/utrecht_exp/data/single_file/20260622/"
 
 handler = pymri.QueuedImageHandler()
 recv = pymri.EmuImageReceiver.create(emu_path, handler)
@@ -30,7 +31,7 @@ while True:
         direction_cosines = int(np.round(math.degrees(math.atan2(image['row_direction_cosines'][1], image['row_direction_cosines'][0]))))
         all_images.append((image_data, direction_cosines))
     
-    if len(all_images) >= len(os.listdir(emu_path))-5:  # Stop after receiving 10 images for demonstration
+    if len(all_images) >= len(os.listdir(emu_path)):  # Stop after receiving 10 images for demonstration
         break
 
 
@@ -46,7 +47,7 @@ print(np.unique(all_cosines))
 
 known_angles = []  
 
-os.makedirs("/utrecht_exp/segmentation/prompt_library/tmp_frontaal", exist_ok=True)
+os.makedirs("/utrecht_exp/segmentation/prompt_library/20260622", exist_ok=True)
 
 for i in range(len(all_cosines)):
     if all_cosines[i] not in known_angles:
@@ -59,7 +60,7 @@ for i in range(len(all_cosines)):
         plt.show()
         print(image.shape)
 
-        sitk.WriteImage(sitk.GetImageFromArray(image), f"/utrecht_exp/segmentation/prompt_library/tmp_frontaal/image_{all_cosines[i]}.mha")
+        sitk.WriteImage(sitk.GetImageFromArray(image), f"/utrecht_exp/segmentation/prompt_library/20260622/image_{all_cosines[i]}.mha")
 
 
         known_angles.append(all_cosines[i])
