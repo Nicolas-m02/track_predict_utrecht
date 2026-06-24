@@ -10,13 +10,13 @@ import struct
 import numpy as np
 import datetime
 import PositionServer_pb2 as ps
-import pyyaml
+import yaml
 
 with open('/utrecht_exp/config.yaml', 'r') as f:
-    config = pyyaml.safe_load(f)
+    config = yaml.safe_load(f)
 
-host = "0.0.0.0"
-port = 9002  # change to 1221 for COM from SAM2
+host = config['ports']['host_receive_com']
+port = config['ports']['port_receive_com'] 
 testing = False
 
 
@@ -28,8 +28,8 @@ testing = False
 # change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
 
 
-host_send = config['ports']['host_receive_com']
-port_send = config['ports']['port_receive_com']
+host_send = config['ports']['host_send_pred']
+port_send = config['ports']['port_send_pred']
 
 # host_gui = 'gui_container'
 host_gui = config['ports']['host_gui']
@@ -368,8 +368,7 @@ class predictor:
                                     self.latest_prediction = data.cpu().numpy().copy()
                                     self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
                                     self.latest_timestamp_recv_mri = timestamp_recv_mri
-                                    self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
-                                    self.latest_timestamp_recv_mri = timestamp_recv_mri
+                                    print(f"Received {self.latest_prediction}")
                                 else:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()

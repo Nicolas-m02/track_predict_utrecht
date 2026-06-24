@@ -424,11 +424,6 @@ class ReceiveImages:
             else:
                 self.gui_queue.put_nowait((image, torch.zeros(image.shape[:2], dtype=bool)))  # Send empty mask to GUI if no click received
 
-            if self.frame_no >= self.break_point:
-                print(f"Reached break point of {self.break_point} frames, stopping tracking.")
-                self.save_masks()
-                break
-
             await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
     async def postprocess_mask(self):

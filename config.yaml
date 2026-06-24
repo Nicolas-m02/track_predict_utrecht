@@ -18,6 +18,7 @@ ports:
   port_gui_predictions: 7005
   port_gui_images: 7000
   port_gui_clicks: 8000
+  port_gui_ext: 8502
 
 # Global settings
 settings:
@@ -28,8 +29,8 @@ settings:
 
   timestamps: True
 
-  enable_gui: False
-  interactive: True
+  enable_gui: True
+  interactive: False
 
 #SAM settings
 tracker:
@@ -39,13 +40,13 @@ tracker:
   image_height: 128
   image_width: 128
   px_size: 1.95
-  prompt_library_path: '/utrecht_exp/segmentation/prompt_library/fiducial_segmented/'
+  prompt_library_path: '/utrecht_exp/segmentation/prompt_library/prompts_circle/'
 
 # LSTM settings
 predictor:
   pred_type: 'lstm'
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
-  no_prediction: False
+  no_prediction: True
   connect_to_mrtc: False
   lookahead_time: 100 #ms
   framerate: 10
