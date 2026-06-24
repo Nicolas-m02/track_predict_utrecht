@@ -30,7 +30,7 @@ settings:
   timestamps: True
 
   enable_gui: True
-  interactive: False
+  interactive: True
 
 #SAM settings
 tracker:

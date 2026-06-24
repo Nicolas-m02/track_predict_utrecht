@@ -110,4 +110,10 @@ p2 = subprocess.Popen(
     stderr=subprocess.STDOUT,
 )
 
+p4 = subprocess.Popen(
+    ["bash", "-c", f"curl http://localhost:{config['ports']['port_gui_ext']}/"],
+    stdout=open("curl.log", "w"),
+    stderr=subprocess.STDOUT,
+)
+
 
