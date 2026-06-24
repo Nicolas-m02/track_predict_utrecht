@@ -158,7 +158,7 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
-        self.no_prediction = False
+        self.no_prediction = True
         self.connect_to_mrtc = False
         self.logging = True
         self.first_data_point_received = False
@@ -181,7 +181,7 @@ class predictor:
         self.latest_timestamp_recv_mri = None
         self.previous_timestamp_recv_mri = None
         self.prediction_done_timestamp = None
-        self.lookahead_time = 250 #ms
+        self.lookahead_time = 0 #ms
         self.prediction_lock = threading.Lock()
 
 
@@ -207,15 +207,15 @@ class predictor:
         if self.logging:
             self.time_logging = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'w') as f:
-                f.write('Online optimization log\n')
+                f.write('Online optimization log, writing last prediction \n')
                 f.write('=======================\n')
 
             with open(f'/utrecht_exp/logs/online_received_{self.time_logging}.txt', 'w') as f:
                 f.write('Online received data log\n')
                 f.write('=======================\n')
 
-            with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'w') as f:
-                f.write('Predictions \n')
+            with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'w') as f:
+                f.write('Predictions, sent after request from MLC \n')
                 f.write('=======================\n')
 
         if self.no_prediction: 
@@ -260,7 +260,7 @@ class predictor:
     async def receive_data(self):
         while True:
             try:
-                if  self.connect_to_mrtc:
+                if self.connect_to_mrtc:
 
                     msg = self.conn.recv()
 
@@ -363,6 +363,8 @@ class predictor:
                                 if self.no_prediction:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = data.cpu().numpy().copy()
+                                    self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
+                                    self.latest_timestamp_recv_mri = timestamp_recv_mri
                                 else:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()
@@ -413,7 +415,7 @@ class predictor:
                 # crop out last point
                 self.online_batched_data = self.online_batched_data[1:,:,:]
                 end_time = time.time()
-                print(f"Online optimization took {end_time - start_time:.4f} seconds.")
+                #print(f"Online optimization took {end_time - start_time:.4f} seconds.")
                 self.current_optimization_point += 1
             
             else:
@@ -444,7 +446,7 @@ class predictor:
 
             try:
                 self.gui_socket.send(struct.pack('2f', interpolated_prediction[0], interpolated_prediction[1]))
-                print(f"Sent prediction {interpolated_prediction} to GUI.")
+                #print(f"Sent prediction {interpolated_prediction} to GUI.")
             except Exception as e:
                 print(f"Error sending to GUI: {e}")
             await asyncio.sleep(0.001)  # Adjust sleep time as needed to control sending frequency
@@ -526,7 +528,7 @@ class predictor:
 
             vec.x = float(arr[0])
             vec.y = float(arr[1])
-            vec.z = float(arr[2])
+            vec.z = float(0.0)
 
 
             print(datetime.datetime.now(),' current predcition x y z ',vec.x,' ',vec.y,' ',vec.z)
@@ -540,7 +542,7 @@ class predictor:
                             
             
             if self.logging:
-                with open('/utrecht_exp/pred_log_file.txt', 'a') as f:
+                with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'a') as f:
                     f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
 
             next_time += period

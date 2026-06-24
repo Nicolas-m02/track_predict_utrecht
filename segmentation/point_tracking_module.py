@@ -85,8 +85,8 @@ class ReceiveImages:
         #self.seen_images = []
 
          # Receiving data params
-        self.zmq_prot = False
-        self.emulation = True
+        self.zmq_prot = True
+        self.emulation = False
         #self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
         self.emu_path = "/utrecht_data/20260616/dat_imgs/"
 
@@ -115,7 +115,7 @@ class ReceiveImages:
         self.send_timestamps = send_timestamps
         self.protocol = protocol
 
-        self.MRTC_prot = False
+        self.MRTC_prot = True
         self.mrtc_port = mrtc_port 
         self.stack_update_host = stack_update_host
         self.stack_update_port = stack_update_port   

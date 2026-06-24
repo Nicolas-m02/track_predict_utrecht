@@ -81,8 +81,8 @@ class ReceiveImages:
         
 
          # Receiving data params
-        self.zmq_prot = False
-        self.emulation = True
+        self.zmq_prot = True
+        self.emulation = False
         #self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
         self.emu_path = "/utrecht_data/20260616/dat_imgs/"
 
@@ -103,7 +103,7 @@ class ReceiveImages:
         self.send_timestamps = send_timestamps
         self.protocol = protocol
 
-        self.MRTC_prot = False
+        self.MRTC_prot = True
         self.mrtc_port = mrtc_port 
         self.stack_update_host = stack_update_host
         self.stack_update_port = stack_update_port   
@@ -479,7 +479,7 @@ class ReceiveImages:
 print("Initializing improved tracking module...")
 async def main():
     image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128),send_timestamps=True)
-    image_receiver.initialize_prompt(prompt_library_path="/utrecht_exp/segmentation/prompt_library/prompts_circle/")
+    image_receiver.initialize_prompt(prompt_library_path="/utrecht_exp/segmentation/prompt_library/circle_2206/")
     image_receiver.connect_send(host=host_send, port=port_send)
     image_receiver.connect(host=host_rec, port=port_rec)
 
