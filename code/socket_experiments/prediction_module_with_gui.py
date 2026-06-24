@@ -10,6 +10,10 @@ import struct
 import numpy as np
 import datetime
 import PositionServer_pb2 as ps
+import pyyaml
+
+with open('/utrecht_exp/config.yaml', 'r') as f:
+    config = pyyaml.safe_load(f)
 
 host = "0.0.0.0"
 port = 9002  # change to 1221 for COM from SAM2
@@ -24,15 +28,15 @@ testing = False
 # change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
 
 
-host_send = '0.0.0.0'
-port_send = 9003
+host_send = config['ports']['host_receive_com']
+port_send = config['ports']['port_receive_com']
 
 # host_gui = 'gui_container'
-host_gui = 'gui_container_local'
-port_gui = 7005 # Tracker is 7000
+host_gui = config['ports']['host_gui']
+port_gui = config['ports']['port_gui_predictions']
 
 
-lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
+lstm_model_path = config['predictor']['lstm_model_path']
 
 os.chdir('/utrecht_exp/code/socket_experiments')
 from socket_model import LSTM
@@ -158,17 +162,16 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
-        self.no_prediction = False
-        self.connect_to_mrtc = False
+        self.no_prediction = config['predictor']['no_prediction']
+        self.connect_to_mrtc = config['predictor']['connect_to_mrtc']
         self.logging = True
         self.first_data_point_received = False
 
         # Scaling params
-        self.img_frequency = 10  # Hz
+        self.img_frequency = config['predictor']['framerate']  # Hz
 
         
         # Params for GUI
-        self.interpolation_point = 2.5 # latency ms/4 * Frequency ms
         self.prediction_queue = asyncio.Queue()
         self.gui_queue = asyncio.Queue()
 
@@ -181,7 +184,7 @@ class predictor:
         self.latest_timestamp_recv_mri = None
         self.previous_timestamp_recv_mri = None
         self.prediction_done_timestamp = None
-        self.lookahead_time = 250 #ms
+        self.lookahead_time = config['predictor']['lookahead_time']
         self.prediction_lock = threading.Lock()
 
 
@@ -214,7 +217,7 @@ class predictor:
                 f.write('Online received data log\n')
                 f.write('=======================\n')
 
-            with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'w') as f:
+            with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'w') as f:
                 f.write('Predictions \n')
                 f.write('=======================\n')
 
@@ -363,6 +366,8 @@ class predictor:
                                 if self.no_prediction:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = data.cpu().numpy().copy()
+                                    self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
+                                    self.latest_timestamp_recv_mri = timestamp_recv_mri
                                 else:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()
@@ -526,7 +531,7 @@ class predictor:
 
             vec.x = float(arr[0])
             vec.y = float(arr[1])
-            vec.z = float(arr[2])
+            vec.z = float(0)
 
 
             print(datetime.datetime.now(),' current predcition x y z ',vec.x,' ',vec.y,' ',vec.z)
@@ -540,7 +545,7 @@ class predictor:
                             
             
             if self.logging:
-                with open('/utrecht_exp/pred_log_file.txt', 'a') as f:
+                with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'a') as f:
                     f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
 
             next_time += period
@@ -560,7 +565,7 @@ class predictor:
 
 # combine coroutines into single future
 async def main():
-    prediction_instance = predictor(receive_timestamps=True,send_frequency=25)
+    prediction_instance = predictor(receive_timestamps=config['settings']['timestamps'],send_frequency=25)
     prediction_instance.connect_sender(host_send, port_send)
     prediction_instance.connect(host,port)
     prediction_instance.connect_to_gui(host_gui,port_gui)

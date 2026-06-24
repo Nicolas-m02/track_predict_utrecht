@@ -1,0 +1,51 @@
+# Setting ports for data transfer
+ports:
+  # Trackers
+  mrtc_port: 4005
+  stack_update_host: '0.0.0.0'
+  stack_update_port: 54323
+  host_send_com: 'prediction_container'
+  port_send_com: 9002
+  
+  # Predictors
+  host_receive_com: '0.0.0.0'
+  port_receive_com: 9002
+  host_send_pred: '0.0.0.0'
+  port_send_pred: 9003
+
+  # GUI
+  host_gui: 'gui_container'
+  port_gui_predictions: 7005
+  port_gui_images: 7000
+  port_gui_clicks: 8000
+
+# Global settings
+settings:
+  emulation: True
+  MRTC: False
+  ZMQ: False
+  emu_path: "/utrecht_exp/data/all_dat_files/small_dat_files"
+
+  timestamps: True
+
+  enable_gui: False
+  interactive: True
+
+#SAM settings
+tracker:
+  sam_type: 'small' # tiny, small, or large
+  sam_mask_threshold: 0
+  sam_downcast_dtype: 'float16'
+  image_height: 128
+  image_width: 128
+  px_size: 1.95
+  prompt_library_path: '/utrecht_exp/segmentation/prompt_library/fiducial_segmented/'
+
+# LSTM settings
+predictor:
+  pred_type: 'lstm'
+  lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
+  no_prediction: False
+  connect_to_mrtc: False
+  lookahead_time: 100 #ms
+  framerate: 10

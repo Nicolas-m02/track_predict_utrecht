@@ -16,3 +16,5 @@
 *.txt
 /segmentation/sam2/*
 */__pycache__/
+core
+*.log

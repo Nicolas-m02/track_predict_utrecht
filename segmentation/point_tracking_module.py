@@ -13,33 +13,36 @@ os.chdir("/utrecht_exp/segmentation/")
 import torch
 import math 
 
+with open("/utrecht_exp/config.yaml", 'r') as f:
+    import yaml
+    config = yaml.safe_load(f)
+
 #host_rec = 'localhost' 
 #port_rec = 1220
 host_rec = '0.0.0.0' 
 port_rec = 6056
 
-host_send = 'prediction_container'
-port_send = 9002
+host_send = config['ports']['host_send_com']
+port_send = config['ports']['port_send_com']
 # Gui configs
-host_gui = 'gui_container_local' # online testing
-# host_gui ='gui_container' # offline testing
-port_gui = 7000
+host_gui = config['ports']['host_gui']
+port_gui = config['ports']['port_gui_images']
 
-host_clicks = 'gui_container_local' # online testing
-# host_clicks ='gui_container' # offline testing
-port_clicks = 8000
+host_clicks = config['ports']['host_gui']
+port_clicks = config['ports']['port_gui_clicks']
 
 #MRTC Receiver configs
-mrtc_port = 4005 # receiving images from MR
-stack_update_host = '0.0.0.0'
-stack_update_port = 54323   # controlling the MR
+mrtc_port = config['ports']['mrtc_port'] # receiving images from MR
+stack_update_host = config['ports']['stack_update_host']
+stack_update_port = config['ports']['stack_update_port']   # controlling the MR
 
 
 # SAM2 Configs
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-sam_mask_threshold = 0.0
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+sam_mask_threshold = config['tracker']['sam_mask_threshold']
 
-sam_type = "small"  
+sam_type = config['tracker']['sam_type'] 
 
 if sam_type == "large":
     overwrite_checkpoint = "./sam2.1_hiera_large.pt"
@@ -85,10 +88,9 @@ class ReceiveImages:
         #self.seen_images = []
 
          # Receiving data params
-        self.zmq_prot = False
-        self.emulation = True
-        #self.emu_path = "/utrecht_exp/data/all_dat_files/small_dat_files"
-        self.emu_path = "/utrecht_data/20260616/dat_imgs/"
+        self.zmq_prot = config['settings']['ZMQ']
+        self.emulation = config['settings']['emulation']
+        self.emu_path = config['settings']['emu_path']
 
         self.image_dimensions = image_dimensions
 
@@ -115,19 +117,15 @@ class ReceiveImages:
         self.send_timestamps = send_timestamps
         self.protocol = protocol
 
-        self.MRTC_prot = False
+        self.MRTC_prot = config['settings']['MRTC']
         self.mrtc_port = mrtc_port 
         self.stack_update_host = stack_update_host
         self.stack_update_port = stack_update_port   
 
-        self.voxel_size_mm = 1.95
+        self.voxel_size_mm = config['tracker']['px_size']
         self.img_size_px = image_dimensions[0]
 
         self.frame_no = 0
-        
-        # Testing params
-        self.break_point = 100000  # Set a break point after which to stop receiving images for testing purposes
-        self.out_masks = []  # List to store output masks for later saving
 
         # SAM 2 initialization
         self.checkpoint = overwrite_checkpoint
@@ -146,12 +144,16 @@ class ReceiveImages:
 
             self.receive_images_enter_log = (f"/utrecht_exp/logs/receive_images_enter_{self.time_logging}.txt")
             self.receive_images_exit_log = (f"/utrecht_exp/logs/receive_images_exit_{self.time_logging}.txt")
-
+            self.gui_sent_log = (f"/utrecht_exp/logs/gui_sent_{self.time_logging}.txt")
             with open(self.receive_images_enter_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
 
             with open(self.receive_images_exit_log, "w") as f:
                 f.write(f"Log file created at {datetime.datetime.now()}\n\n")
+
+            with open(self.gui_sent_log, "w") as f:
+                f.write(f"Log file created at {datetime.datetime.now()}\n\n")
+
 
     def connect(self, host=host_rec, port=port_rec):
         if self.zmq_prot and not self.MRTC_prot and not self.emulation:
@@ -285,7 +287,7 @@ class ReceiveImages:
                     await self.seen_images_queue.put(img_array)
 
                 if self.logging:
-                    with open(f"/utrecht_exp/logs/receive_images_enter{self.time_logging}.txt", 'a') as f:
+                    with open(self.receive_images_enter_log, 'a') as f:
                         f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
 
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
@@ -305,7 +307,7 @@ class ReceiveImages:
                         await self.seen_images_queue.put(image['data'])
                     #print(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}")
                     if self.logging:
-                        with open(f"/utrecht_exp/logs/receive_images_enter{self.time_logging}.txt", 'a') as f:
+                        with open(self.receive_images_enter_log, 'a') as f:
                             f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
                 await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
@@ -337,7 +339,7 @@ class ReceiveImages:
                     await self.seen_images_queue.put(img_array)
 
                     if self.logging:
-                        with open(f"/utrecht_exp/logs/receive_images_enter{self.time_logging}.txt", 'a') as f:
+                        with open(self.receive_images_enter_log, 'a') as f:
                             f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
                 #print(f"Number of seen images: {len(self.seen_images)}")
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
@@ -471,7 +473,7 @@ class ReceiveImages:
                     self.send_socket.send(value)
 
                     if self.logging:
-                        with open(f"/utrecht_exp/logs/receive_images_exit{self.time_logging}.txt", 'a') as f:
+                        with open(self.receive_images_exit_log, 'a') as f:
                             f.write(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}\n")
                 await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
     # GUI main function 
@@ -523,7 +525,7 @@ class ReceiveImages:
             end_time = time.time()
             #print(f"Sent image and mask to GUI in {end_time - start_time:.4f} seconds")
             
-            with open(f"/utrecht_exp/logs/gui_sent{self.time_logging}.txt", 'a') as f:
+            with open(self.gui_sent_log, 'a') as f:
                 f.write(f"Sent image and mask for frame {self.frame_no} to GUI at {datetime.datetime.now()}\n")
 
             await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
@@ -614,7 +616,7 @@ class ReceiveImages:
     
 print("Initializing improved tracking module with gui support...")
 async def main():
-    image_receiver = ReceiveImages(send_data=True,image_dimensions=(128,128),send_timestamps=True)
+    image_receiver = ReceiveImages(send_data=True,image_dimensions=(config['tracker']['image_height'], config['tracker']['image_width']),send_timestamps=config['settings']['timestamps'])
     image_receiver.connect(host=host_rec, port=port_rec)
     image_receiver.connect_send(host=host_send, port=port_send)
     image_receiver.connect_to_gui(host=host_gui, port=port_gui)
@@ -632,12 +634,3 @@ async def main():
 
 asyncio.run(main())
 
-
-#%%
-import socket
-
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-s.shutdown(socket.SHUT_RDWR)
-s.close()

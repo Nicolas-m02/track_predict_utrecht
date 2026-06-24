@@ -8,10 +8,16 @@ import torch
 import torch.nn as nn
 import struct
 import numpy as np
+import datetime
 import PositionServer_pb2 as ps
+import yaml
 
-host = "0.0.0.0"
-port = 9002  
+with open('/utrecht_exp/config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+
+host = config['ports']['host_receive_com']
+port = config['ports']['port_receive_com']  # change to 1221 for COM from SAM2
+testing = False 
 
 #port = 6055 
 # ######################## watch out: 
@@ -20,17 +26,16 @@ port = 9002
 
 # change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
 
-testing = False
+host_send = config['ports']['host_send_pred']
+port_send = config['ports']['port_send_pred']
 
-host_send = '0.0.0.0'
-port_send = 9003
+lstm_model_path = config['predictor']['lstm_model_path']
 
-lstm_model_path = '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
 os.chdir('/utrecht_exp/code/socket_experiments')
 from socket_model import LSTM
 
 
-device = torch.device("cuda:0")
+device = torch.device('cuda:0')
 print(device)
 
 def better_manual_scaler(input_data, scale_range, backward=False):
@@ -152,13 +157,13 @@ class predictor:
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
-        self.no_prediction = False
-        self.connect_to_mrtc = False
+        self.no_prediction = config['predictor']['no_prediction']
+        self.connect_to_mrtc = config['predictor']['connect_to_mrtc']
         self.logging = True
         self.first_data_point_received = False
 
         # Scaling params
-        self.img_frequency = 10  # Hz
+        self.img_frequency = config['predictor']['framerate']  # Hz
         # Params for sending predictions
         self.send_frequency = send_frequency
         import threading
@@ -168,7 +173,7 @@ class predictor:
         self.latest_timestamp_recv_mri = None
         self.previous_timestamp_recv_mri = None
         self.prediction_done_timestamp = None
-        self.lookahead_time = 250 #ms
+        self.lookahead_time = config['predictor']['lookahead_time']
         self.prediction_lock = threading.Lock()
 
 
@@ -201,13 +206,12 @@ class predictor:
                 f.write('Online received data log\n')
                 f.write('=======================\n')
 
-            with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'w') as f:
+            with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'w') as f:
                 f.write('Predictions \n')
                 f.write('=======================\n')
 
         if self.no_prediction: 
             print("Running with no prediction")
-
 
     def connect(self,host=host, port=port): # receiver
 
@@ -500,7 +504,7 @@ class predictor:
                             
             
             if self.logging:
-                with open(f'/utrecht_exp/pred_log_file_{self.time_logging}.txt', 'a') as f:
+                with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'a') as f:
                     f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
 
             next_time += period
@@ -515,7 +519,7 @@ class predictor:
     
 # combine coroutines into single future
 async def main():
-    prediction_instance = predictor(receive_timestamps=True, send_frequency=100)
+    prediction_instance = predictor(receive_timestamps=config['settings']['timestamps'], send_frequency=100)
     prediction_instance.connect_sender(host_send, port_send)
     prediction_instance.connect(host,port)
     sender_thread = threading.Thread(
