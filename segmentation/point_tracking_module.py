@@ -62,7 +62,7 @@ testing = False
 
 from scipy.ndimage import center_of_mass
 
-def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
+def torch_center_of_mass(mask, img_size_px, interpol, voxel_size_mm):
     mask = mask.float()
     h, w = mask.shape[-2:]
     y = torch.arange(h, device=mask.device).view(-1, 1)
@@ -72,8 +72,8 @@ def torch_center_of_mass(mask, img_size_px, voxel_size_mm):
     cy = (mask * y).sum() / total
     cx = (mask * x).sum() / total
 
-    dy_px = cy - img_size_px // 2
-    dx_px = cx - img_size_px // 2
+    dy_px = cy/interpol - img_size_px/interpol // 2
+    dx_px = cx/interpol - img_size_px/interpol // 2
 
     dx_mm = dx_px * voxel_size_mm
     dy_mm = - dy_px * voxel_size_mm      # changed direction to comply with motion of phantom
@@ -101,6 +101,9 @@ class ReceiveImages:
         self.click_coordinates = None
         self.mask_received = False
         self.mask_data = None
+        
+        self.interpolation_scale = 1
+
 
         # Asyncio queue
         self.seen_images_queue = asyncio.Queue(maxsize=max_queue_size) # can add maxsize parameter
@@ -353,7 +356,6 @@ class ReceiveImages:
                     img_array = img_array.astype(np.uint16)  # Convert to uint8 for OpenCV processing
                     end_time = time.time()
                     #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
-                    #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
                     await self.seen_images_queue.put(img_array)
 
                     if config["logging"]["debug"]:
@@ -371,8 +373,20 @@ class ReceiveImages:
                 image, timestamp = await self.seen_images_queue.get()
             else:
                 image = await self.seen_images_queue.get()
-            prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
             
+            prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            start_time = time.time()
+
+            prep_image = cv2.resize(
+                prep_image,
+                None,
+                fx=self.interpolation_scale,
+                fy=self.interpolation_scale,
+                interpolation=cv2.INTER_LINEAR
+            )            
+            end_time = time.time()
+            print(f" {end_time - start_time:.4f} seconds")
             if self.send_timestamps:
                 self.preprocessed_images_queue.put_nowait((prep_image, timestamp))
             else:
@@ -418,8 +432,6 @@ class ReceiveImages:
                                 print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
                                 self.gui_queue.put_nowait((image, out_mask))
                             else:
-                                print("Tracking new frame...")
-
                                 
                                 _, out_mask_logits = self.predictor.track(image)
                                 
@@ -445,7 +457,7 @@ class ReceiveImages:
             else:
                 new_mask = await self.masks_queue.get()
 
-            new_com = torch_center_of_mass(new_mask, self.img_size_px, self.voxel_size_mm)
+            new_com = torch_center_of_mass(new_mask, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
             
             if self.send_timestamps:
                 self.coms_queue.put_nowait((new_com, timestamp))

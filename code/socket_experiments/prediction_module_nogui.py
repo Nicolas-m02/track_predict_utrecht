@@ -16,11 +16,17 @@ import yaml
 with open('/utrecht_exp/config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
-host = config['ports']['host_receive_com']
-port = config['ports']['port_receive_com']  # change to 1221 for COM from SAM2
+
+host_receive_com = config['ports']['host_receive_com']
+if not config['predictor']['connect_to_external_motion_estimation']:
+    port_receive_com = config['ports']['port_receive_com']
+else:
+    port_receive_com = config['ports']['mrtc_port']
+
+
 testing = False 
 
-print(f"Starting the prediction module without GUI. Host: {host}, Port: {port}, Testing: {testing}")
+#print(f"Starting the prediction module without GUI. Host: {host}, Port: {port}, Testing: {testing}")
 
 #port = 6055 
 # ######################## watch out: 
@@ -119,7 +125,7 @@ import datetime
 class predictor:
     
     def __init__(self,receive_timestamps=False,send_frequency=None):
-        print(f"Starting the prediction module without GUI. Host: {host}, Port: {port}, Testing: {testing}")
+        #print(f"Starting the prediction module without GUI. Host: {host}, Port: {port}, Testing: {testing}")
 
         self.input_size = 100
         self.output_size = 4
@@ -163,7 +169,7 @@ class predictor:
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
         self.no_prediction = config['predictor']['no_prediction']
-        self.connect_to_mrtc = config['predictor']['connect_to_mrtc']
+        self.connect_to_external_motion_estimation = config['predictor']['connect_to_external_motion_estimation']
         self.logging = True
         self.first_data_point_received = False
 
@@ -218,9 +224,9 @@ class predictor:
         if self.no_prediction: 
             print("Running with no prediction")
 
-    def connect(self,host=host, port=port): # receiver
+    def connect(self,host, port): # receiver
 
-        if self.connect_to_mrtc:
+        if self.connect_to_external_motion_estimation:
             import zmq
             self.context = zmq.Context()
             self.socket = self.context.socket(zmq.SUB)
@@ -252,7 +258,7 @@ class predictor:
     async def receive_data(self):
         while True:
             try:
-                if  self.connect_to_mrtc:
+                if  self.connect_to_external_motion_estimation:
 
                     msg = self.conn.recv()
 
@@ -526,7 +532,7 @@ class predictor:
 async def main():
     prediction_instance = predictor(receive_timestamps=config['settings']['timestamps'], send_frequency=100)
     prediction_instance.connect_sender(host_send, port_send)
-    prediction_instance.connect(host,port)
+    prediction_instance.connect(host_receive_com,port_receive_com)
     sender_thread = threading.Thread(
         target=prediction_instance.send_prediction_loop,
         daemon=True

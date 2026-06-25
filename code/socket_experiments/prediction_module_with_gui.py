@@ -20,14 +20,18 @@ with open('/utrecht_exp/config.yaml', 'r') as f:
 
 testing = False
 
-host_receive_com = config['ports']['host_receive_com']
-port_receive_com = config['ports']['port_receive_com']
 #port_receive_com = 6055 
 # ######################## watch out: 
 # if directly connect to mrtc then port 4005 should be exposed 
 # (right now done so with SAM container, need to be changed!) 
 
 # change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
+host_receive_com = config['ports']['host_receive_com']
+if not config['predictor']['connect_to_external_motion_estimation']:
+    port_receive_com = config['ports']['port_receive_com']
+else:
+    port_receive_com = config['ports']['mrtc_port']
+
 
 
 host_send = config['ports']['host_send_pred']
