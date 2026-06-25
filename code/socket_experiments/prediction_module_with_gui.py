@@ -362,8 +362,7 @@ class predictor:
                                     self.latest_prediction = data.cpu().numpy().copy()
                                     self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
                                     self.latest_timestamp_recv_mri = timestamp_recv_mri
-                                    self.previous_timestamp_recv_mri = self.latest_timestamp_recv_mri
-                                    self.latest_timestamp_recv_mri = timestamp_recv_mri
+                                    print(f"Received {self.latest_prediction}")
                                 else:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()

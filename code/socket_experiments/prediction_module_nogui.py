@@ -1,4 +1,5 @@
 #%%
+print('START')
 import os
 import sys
 import threading
@@ -18,6 +19,8 @@ with open('/utrecht_exp/config.yaml', 'r') as f:
 host = config['ports']['host_receive_com']
 port = config['ports']['port_receive_com']  # change to 1221 for COM from SAM2
 testing = False 
+
+print(f"Starting the prediction module without GUI. Host: {host}, Port: {port}, Testing: {testing}")
 
 #port = 6055 
 # ######################## watch out: 
@@ -116,6 +119,8 @@ import datetime
 class predictor:
     
     def __init__(self,receive_timestamps=False,send_frequency=None):
+        print(f"Starting the prediction module without GUI. Host: {host}, Port: {port}, Testing: {testing}")
+
         self.input_size = 100
         self.output_size = 4
         self.input_dim = 2
