@@ -1,6 +1,8 @@
 #%%
 
 import datetime
+from zoneinfo import ZoneInfo
+from pathlib import Path
 import os
 import numpy as np
 import socket
@@ -126,6 +128,7 @@ class ReceiveImages:
         self.img_size_px = image_dimensions[0]
 
         self.frame_no = 0
+        self.out_masks = []  # List to store output masks for later saving
 
         # SAM 2 initialization
         self.checkpoint = overwrite_checkpoint
@@ -136,23 +139,34 @@ class ReceiveImages:
         self.downcast_dtype = torch.float16
         print(f"SAM 2 {sam_type} initialized")
 
-        import datetime
         # logging 
-        self.logging = True
-        if self.logging:
-            self.time_logging = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        LOG_DIR_POINT_TRACKING = Path(config["logging"]["folder"]) / "point_tracking"
 
-            self.receive_images_enter_log = (f"/utrecht_exp/logs/receive_images_enter_{self.time_logging}.txt")
-            self.receive_images_exit_log = (f"/utrecht_exp/logs/receive_images_exit_{self.time_logging}.txt")
-            self.gui_sent_log = (f"/utrecht_exp/logs/gui_sent_{self.time_logging}.txt")
-            with open(self.receive_images_enter_log, "w") as f:
-                f.write(f"Log file created at {datetime.datetime.now()}\n\n")
+        LOG_DIR_POINT_TRACKING.mkdir(parents=True, exist_ok=True)
 
+        now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+        ts = now.strftime("%Y%m%dT%H%M%S.%f")
+
+        if config["logging"]["sam_log"] or config["logging"]["debug"]:
+
+            LOG_FILE_PATH_EXIT = LOG_DIR_POINT_TRACKING / f"mri{ts}.txt"
+            self.receive_images_exit_log = (LOG_FILE_PATH_EXIT)
             with open(self.receive_images_exit_log, "w") as f:
-                f.write(f"Log file created at {datetime.datetime.now()}\n\n")
+                f.write(f"Log file created at {ts}\n\n")
+
+        if config["logging"]["debug"]:
+
+            LOG_FILE_PATH_ENTER = LOG_DIR_POINT_TRACKING / f"receive_images_enter_{ts}.txt"
+            LOG_FILE_PATH_GUISENT = LOG_DIR_POINT_TRACKING / f"gui_sent_{ts}.txt"
+
+            self.receive_images_enter_log = (LOG_FILE_PATH_ENTER)
+            self.gui_sent_log = (LOG_FILE_PATH_GUISENT)
+
+            with open(self.receive_images_enter_log, "w") as f:
+                f.write(f"Log file created at {ts}\n\n")
 
             with open(self.gui_sent_log, "w") as f:
-                f.write(f"Log file created at {datetime.datetime.now()}\n\n")
+                f.write(f"Log file created at {ts}\n\n")
 
 
     def connect(self, host=host_rec, port=port_rec):
@@ -286,9 +300,11 @@ class ReceiveImages:
                 else:
                     await self.seen_images_queue.put(img_array)
 
-                if self.logging:
+                if config["logging"]["debug"]:
+                    now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                    ts = now.strftime("%Y%m%dT%H%M%S.%f")
                     with open(self.receive_images_enter_log, 'a') as f:
-                        f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
+                        f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {ts}\n")
 
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
 
@@ -306,9 +322,11 @@ class ReceiveImages:
                     else:
                         await self.seen_images_queue.put(image['data'])
                     #print(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}")
-                    if self.logging:
+                    if config["logging"]["debug"]:
+                        now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                        ts = now.strftime("%Y%m%dT%H%M%S.%f")
                         with open(self.receive_images_enter_log, 'a') as f:
-                            f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
+                            f.write(f"Received image of size {image['data'].size} for frame {self.frame_no} at {ts}\n")
                 await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
         else:
@@ -338,9 +356,11 @@ class ReceiveImages:
                     #print(f"Received image of size {img_array.size} in {end_time - start_time:.4f} seconds")
                     await self.seen_images_queue.put(img_array)
 
-                    if self.logging:
+                    if config["logging"]["debug"]:
+                        now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                        ts = now.strftime("%Y%m%dT%H%M%S.%f")
                         with open(self.receive_images_enter_log, 'a') as f:
-                            f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {datetime.datetime.now()}\n")
+                            f.write(f"Received image of size {img_array.size} for frame {self.frame_no} at {ts}\n")
                 #print(f"Number of seen images: {len(self.seen_images)}")
                 await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
                 
@@ -370,14 +390,6 @@ class ReceiveImages:
                 print(self.frame_no)
                 with torch.inference_mode():
                         with torch.autocast('cuda', dtype=self.downcast_dtype):
-                            
-                            #####
-                            #####
-                            #####
-                            ##### TODO: add angle change like in improved_tracker_with_gui_support
-                            #####
-                            #####
-
 
                             if self.frame_no == 1 or (self.click_received or self.mask_received): 
                                 print(f"Initializing SAM {sam_type} with the first frame and prompt")
@@ -424,11 +436,6 @@ class ReceiveImages:
             else:
                 self.gui_queue.put_nowait((image, torch.zeros(image.shape[:2], dtype=bool)))  # Send empty mask to GUI if no click received
 
-            if self.frame_no >= self.break_point:
-                print(f"Reached break point of {self.break_point} frames, stopping tracking.")
-                self.save_masks()
-                break
-
             await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
     async def postprocess_mask(self):
@@ -471,10 +478,16 @@ class ReceiveImages:
                         else:
                             value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
                     self.send_socket.send(value)
-
-                    if self.logging:
+                    now = datetime.datetime.now()
+                    ts = now.strftime("%Y%m%dT%H%M%S.%f")
+                    if config["logging"]["sam_log"]:
                         with open(self.receive_images_exit_log, 'a') as f:
-                            f.write(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}\n")
+                            f.write(f"{ts} INFO:    gantry angle is currently: templ_at_angle_90\n")
+                            f.write(f"{ts} INFO:    mean_x:{new_com[0]}\n")
+                            f.write(f"{ts} INFO:    mean_y:{new_com[1]}\n")
+                    if config["logging"]["debug"]:
+                        with open(self.receive_images_exit_log, 'a') as f:
+                            f.write(f"Sent center of mass for frame {self.frame_no}: {new_com} at {ts}\n")
                 await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
     # GUI main function 
 
@@ -524,9 +537,9 @@ class ReceiveImages:
             #print(f"Sent image to GUI in {sending_time_end - sending_time_start:.4f} seconds")
             end_time = time.time()
             #print(f"Sent image and mask to GUI in {end_time - start_time:.4f} seconds")
-            
-            with open(self.gui_sent_log, 'a') as f:
-                f.write(f"Sent image and mask for frame {self.frame_no} to GUI at {datetime.datetime.now()}\n")
+            if config["logging"]["debug"]:
+                with open(self.gui_sent_log, 'a') as f:
+                    f.write(f"Sent image and mask for frame {self.frame_no} to GUI at {datetime.datetime.now()}\n")
 
             await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
 

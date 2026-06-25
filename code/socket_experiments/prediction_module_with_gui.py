@@ -9,18 +9,20 @@ import torch.nn as nn
 import struct
 import numpy as np
 import datetime
+from backports.zoneinfo import ZoneInfo
+from pathlib import Path
 import PositionServer_pb2 as ps
-import pyyaml
+import yaml
+import time
 
 with open('/utrecht_exp/config.yaml', 'r') as f:
-    config = pyyaml.safe_load(f)
+    config = yaml.safe_load(f)
 
-host = "0.0.0.0"
-port = 9002  # change to 1221 for COM from SAM2
 testing = False
 
-
-#port = 6055 
+host_receive_com = config['ports']['host_receive_com']
+port_receive_com = config['ports']['port_receive_com']
+#port_receive_com = 6055 
 # ######################## watch out: 
 # if directly connect to mrtc then port 4005 should be exposed 
 # (right now done so with SAM container, need to be changed!) 
@@ -28,8 +30,8 @@ testing = False
 # change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
 
 
-host_send = config['ports']['host_receive_com']
-port_send = config['ports']['port_receive_com']
+host_send = config['ports']['host_send_pred']
+port_send = config['ports']['port_send_pred']
 
 # host_gui = 'gui_container'
 host_gui = config['ports']['host_gui']
@@ -98,7 +100,6 @@ def undo_sliding_window_norm(inputarray,sliding_window_range, dimension=1):
     if dimension == 1:
         maximum = sliding_window_range[0]
         minimum = sliding_window_range[1]
-        #print(type(inputarray))
         output = (inputarray+1)*(maximum-minimum)/2 + minimum
         return output
 
@@ -108,15 +109,10 @@ def undo_sliding_window_norm(inputarray,sliding_window_range, dimension=1):
         max2 = sliding_window_range[1][0]
         min2 = sliding_window_range[1][1]
 
-        #print(f"max1: {max1}, min1: {min1}, max2: {max2}, min2: {min2}")
         output = np.zeros((np.shape(inputarray)[0],2))
         output[:,0] = (inputarray[:,0]+1)*(max1-min1)/2 + min1
         output[:,1] = (inputarray[:,1]+1)*(max2-min2)/2 + min2
         return output
-
-import time
-import matplotlib.pyplot as plt
-import datetime
 
 class predictor:
     
@@ -147,8 +143,6 @@ class predictor:
 
         print(f'Device: {torch.cuda.get_device_name()}')
         print(f'Cuda version: {torch.version.cuda}')
-        print(torch.cuda.is_available())
-        print(torch.cuda.device_count())
         
         self.current_data_point = 0
         self.current_prediction_point = 0
@@ -163,8 +157,7 @@ class predictor:
         self.online_target = torch.zeros((1,self.output_size,self.output_dim)).float().to(device)
 
         self.no_prediction = config['predictor']['no_prediction']
-        self.connect_to_mrtc = config['predictor']['connect_to_mrtc']
-        self.logging = True
+        self.connect_to_external_motion_estimation = config['predictor']['connect_to_external_motion_estimation']
         self.first_data_point_received = False
 
         # Scaling params
@@ -199,7 +192,6 @@ class predictor:
                 self.lstm_model.train()
                 self.optimizer.zero_grad()
                 dummy_training = torch.rand((200,self.input_size,self.input_dim)).float().to(device)
-                print(dummy_training.shape)
                 output = self.lstm_model(dummy_training)
                 loss = nn.MSELoss()(output, torch.rand((200,self.output_size,self.input_dim)).float().to(device))
                 loss.backward()
@@ -207,26 +199,33 @@ class predictor:
 
         print('Warmed up LSTM model with dummy data.')
 
-        if self.logging:
-            self.time_logging = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'w') as f:
-                f.write('Online optimization log, writing last prediction \n')
-                f.write('=======================\n')
+        LOG_DIR_LSTM = Path(config["logging"]["folder"]) / "lstm"
 
-            with open(f'/utrecht_exp/logs/online_received_{self.time_logging}.txt', 'w') as f:
-                f.write('Online received data log\n')
-                f.write('=======================\n')
 
-            with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'w') as f:
+        LOG_DIR_LSTM.mkdir(parents=True, exist_ok=True)
+
+        now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+        ts = now.strftime("%Y%m%dT%H%M%S.%f")
+
+        if config['logging']['lstm_pred_log']:
+            self.log_file_path_pred = LOG_DIR_LSTM / f"pred_log_file_{ts}.txt"
+            with open(self.log_file_path_pred, 'w') as f:
                 f.write('Predictions, sent after request from MLC \n')
                 f.write('=======================\n')
+
+        if config['logging']['lstm_optimization_log']:
+            self.log_file_path_optimization = LOG_DIR_LSTM / f"online_log_{ts}.txt"
+            with open(self.log_file_path_optimization, 'w') as f:
+                f.write('Online optimization log\n')
+                f.write('=======================\n')
+
 
         if self.no_prediction: 
             print("Running with no prediction")
 
-    def connect(self,host=host, port=port): # receiver
-
-        if self.connect_to_mrtc:
+    def connect(self,host, port): # receiver
+        print("self.connect to mrtc is: ", self.connect_to_external_motion_estimation)
+        if self.connect_to_external_motion_estimation:
             import zmq
             self.context = zmq.Context()
             self.socket = self.context.socket(zmq.SUB)
@@ -263,7 +262,7 @@ class predictor:
     async def receive_data(self):
         while True:
             try:
-                if self.connect_to_mrtc:
+                if self.connect_to_external_motion_estimation:
 
                     msg = self.conn.recv()
 
@@ -294,7 +293,6 @@ class predictor:
                             buf += chunk
 
                         x, y, timestamp_ns = struct.unpack('2fQ', buf)
-                        #print(f"Received data: x={x}, y={y}, timestamp={timestamp_ns}")
                         data = torch.tensor([x,y]).to(device)
                         self.new_data_queue.put_nowait((data, timestamp_ns))
 
@@ -322,10 +320,6 @@ class predictor:
                 else:
                     data = await self.new_data_queue.get()
                 self.true_history.append(data.cpu().numpy())
-
-                if self.logging:
-                    with open(f'/utrecht_exp/logs/online_received_{self.time_logging}.txt', 'a') as f:
-                        f.write(f"Received data: {data.cpu().numpy()} at {datetime.datetime.now()}\n")
                 self.current_data_point += 1
 
                 if self.first_data_point_received == False:
@@ -386,11 +380,16 @@ class predictor:
                                     self.latest_prediction = output.copy()                        
                         self.current_prediction_point += 1
                         self.gui_queue.put_nowait(output)
-                        self.prediction_done_timestamp = datetime.datetime.now().timestamp()
+                        self.prediction_done_timestamp = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                        ts = self.prediction_done_timestamp.strftime("%Y%m%dT%H%M%S.%f")
 
-                        if self.logging:
-                            with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'a') as f:
-                                f.write(f"Prediction: {output[-1,:]} at {datetime.datetime.now()}\n")
+                        if config['logging']['lstm_pred_log']:
+                            with open(self.log_file_path_pred, 'a') as f:
+                                f.write(f"{ts}  INFO: Pred 1: {output[0,:]} \n")
+                                f.write(f"{ts}  INFO: Pred 2: {output[1,:]} \n")
+                                f.write(f"{ts}  INFO: Pred 3: {output[2,:]} \n")
+                                f.write(f"{ts}  INFO: Pred 4: {output[3,:]} \n")
+
                         #print("Queue size:", self.prediction_queue.qsize())
             
                 await asyncio.sleep(0.001) 
@@ -407,8 +406,6 @@ class predictor:
                 self.online_input = self.online_batched_data[:,-self.input_size:-self.output_size,:].unsqueeze(0)
                 self.online_target = self.online_batched_data[:,-self.output_size:,:].unsqueeze(0)
 
-                # print(self.online_input[0,:,:].shape)
-                # print(self.online_target.squeeze(0).shape)
                 self.lstm_model.train()
                 for epoch in range(self.online_epochs):
                     self.optimizer.zero_grad()
@@ -420,7 +417,10 @@ class predictor:
                 # crop out last point
                 self.online_batched_data = self.online_batched_data[1:,:,:]
                 end_time = time.time()
-                #print(f"Online optimization took {end_time - start_time:.4f} seconds.")
+                if config['logging']['lstm_optimization_log']:
+                    with open(self.log_file_path_optimization, 'a') as f:
+                        f.write(f"Online optimization took {1000*(end_time - start_time):.2f} ms\n")
+
                 self.current_optimization_point += 1
             
             else:
@@ -546,8 +546,8 @@ class predictor:
             self.conn_send.send(env.SerializeToString())
                             
             
-            if self.logging:
-                with open(f'/utrecht_exp/logs/pred_log_file_{self.time_logging}.txt', 'a') as f:
+            if config['logging']['lstm_pred_log']:
+                with open(self.log_file_path_pred, 'a') as f:
                     f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
 
             next_time += period
@@ -569,7 +569,7 @@ class predictor:
 async def main():
     prediction_instance = predictor(receive_timestamps=config['settings']['timestamps'],send_frequency=25)
     prediction_instance.connect_sender(host_send, port_send)
-    prediction_instance.connect(host,port)
+    prediction_instance.connect(host_receive_com,port_receive_com)
     prediction_instance.connect_to_gui(host_gui,port_gui)
     sender_thread = threading.Thread(
         target=prediction_instance.send_prediction_loop,

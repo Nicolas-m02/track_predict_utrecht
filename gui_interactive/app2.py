@@ -2,7 +2,9 @@
 
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import time
+import os
 
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
@@ -16,9 +18,28 @@ import numpy as np
 import cv2
 import SimpleITK as sitk
 
+
+
+with open("/utrecht_exp/config.yaml", 'r') as f:
+    import yaml
+    config = yaml.safe_load(f)
+
+
+logging = config['logging']['gui_log']
+
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
-LOG_FILE_PATH = BASE_DIR / "stream_log.txt"
+
+LOG_DIR_GUI = Path(config["logging"]["folder"]) / "gui"
+
+if logging:
+    LOG_DIR_GUI.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    ts = now.strftime("%Y%m%dT%H%M%S.%f")
+
+    LOG_FILE_PATH = LOG_DIR_GUI / f"stream_log_{ts}.txt"
+
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -87,9 +108,9 @@ async def websocket_endpoint(ws: WebSocket):
         if ws in clients:
             clients.remove(ws)
 
-
-with open(LOG_FILE_PATH, "w") as log_file:
-    log_file.write("frame,byte_time,total_time\n")
+if logging:
+    with open(LOG_FILE_PATH, "w") as log_file:
+        log_file.write("frame,byte_time,total_time\n")
 
 height, width = 128, 128
 current_frame = 0
@@ -142,8 +163,9 @@ def socket_loop(host, port):
 
         latest_frame = frame_b64
 
-        with open(LOG_FILE_PATH, "a") as log_file:
-            log_file.write(f"Frame {current_frame} broadcast at {datetime.now()}\n")
+        if logging:
+            with open(LOG_FILE_PATH, "a") as log_file:
+                log_file.write(f"Frame {current_frame} broadcast at {datetime.now()}\n")
 
         current_frame += 1
 
