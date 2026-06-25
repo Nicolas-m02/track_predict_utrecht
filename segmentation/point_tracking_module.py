@@ -102,7 +102,11 @@ class ReceiveImages:
         self.mask_received = False
         self.mask_data = None
         
+        # interpolation to upscale images
         self.interpolation_scale = 1
+
+        # Adding shift 
+        self.automatic_shift = (0,0)
 
 
         # Asyncio queue
@@ -415,9 +419,14 @@ class ReceiveImages:
                                 if self.click_received:
                                     _,_, out_mask_logits = self.predictor.add_new_points(frame_idx=0, obj_id=0, points=np.array([self.click_coordinates]), labels=np.array([1]))
                                     self.click_received = False  # Reset click received flag after processing
+                                    self.shift = torch_center_of_mass(out_mask_logits>sam_mask_threshold, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
+                                    print(self.shift)
+
                                 elif self.mask_received:
                                     _,_, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.mask_data)
                                     self.mask_received = False  # Reset mask received flag after processing
+                                    self.shift = torch_center_of_mass(out_mask_logits>sam_mask_threshold, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
+                                    print(self.shift)
 
                                 out_mask = out_mask_logits>sam_mask_threshold
                                 self.out_masks.append(out_mask)  # Store the first mask for later saving
@@ -458,7 +467,7 @@ class ReceiveImages:
                 new_mask = await self.masks_queue.get()
 
             new_com = torch_center_of_mass(new_mask, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
-            
+            new_com = new_com - self.shift
             if self.send_timestamps:
                 self.coms_queue.put_nowait((new_com, timestamp))
             else:
@@ -614,6 +623,7 @@ class ReceiveImages:
                                 print(f"Unique values in mask: {np.unique(mask_array)}")
                                 print(f"Mask data type: {mask_array.dtype}")
                                 print(f"Mask array shape: {mask_array.shape}")
+
 
             except asyncio.TimeoutError:
                 pass

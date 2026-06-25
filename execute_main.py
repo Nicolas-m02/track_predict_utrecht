@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import yaml
-print("Starting the prediction module with GUI...")
 
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
@@ -42,8 +41,8 @@ except subprocess.CalledProcessError as e:
 print(f'Running {script_pred} and {script_track} in Docker containers...')
 
 cmd1 = f"""
-docker run --rm --name "prediction_container" --gpus=all --shm-size=32G \
--v /project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp:/utrecht_exp \
+docker run --rm --name {config["paths"]["pred_name"]} --gpus=all --shm-size=32G \
+-v {config["paths"]["code_path"]}:/utrecht_exp \
 --network network_testing \
 -w /utrecht_exp \
 gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:01 \
@@ -53,8 +52,8 @@ python {script_pred}'
 """
 
 cmd2 = f"""
-docker run --rm --name "tracking_container" --gpus=all --shm-size=32G \
--v /project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp:/utrecht_exp \
+docker run --rm --name {config["paths"]["track_name"]} --gpus=all --shm-size=32G \
+-v {config["paths"]["code_path"]}:/utrecht_exp \
 --network network_testing \
 -w /utrecht_exp \
 gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:seg_02 \
@@ -68,8 +67,8 @@ python {script_track}"
 if config['settings']['enable_gui']:
     print("Starting the GUI")
     cmd3 = f"""
-    docker run --rm --name "gui_container" --gpus=all --shm-size=32G \
-    -v /project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp:/utrecht_exp \
+    docker run --rm --name {config["paths"]["gui_name"]} --gpus=all --shm-size=32G \
+    -v {config["paths"]["code_path"]}:/utrecht_exp \
     --network network_testing \
     -p {config['ports']['port_gui_ext']}:{config['ports']['port_gui_ext']} \
     -w /utrecht_exp \
@@ -91,29 +90,34 @@ p1 = subprocess.Popen(
     stderr=subprocess.STDOUT,
 )
 
-time.sleep(10)
-
 if config['settings']['enable_gui']:
+    print("Starting the prediction module with GUI...")
+    time.sleep(10)
+    print(f"Pinging adress at {config['ports']['port_gui_ext']}")
+    p4 = subprocess.Popen(
+        ["bash", "-c", f"curl http://localhost:{config['ports']['port_gui_ext']}/"],
+        stdout=open("curl.log", "w"),
+        stderr=subprocess.STDOUT,
+    )
+    print("Starting GUI ...")
     p3 = subprocess.Popen(
         ["bash", "-c", cmd3],
         stdout=open("gui.log", "w"),
         stderr=subprocess.STDOUT,
     )
+else:
+    print("Starting the prediction module...")
 
 time.sleep(15)
 
 
-
+print("Starting tracker ...")
 p2 = subprocess.Popen(
     ["bash", "-c", cmd2],
     stdout=open("tracking.log", "w"),
     stderr=subprocess.STDOUT,
 )
 
-p4 = subprocess.Popen(
-    ["bash", "-c", f"curl http://localhost:{config['ports']['port_gui_ext']}/"],
-    stdout=open("curl.log", "w"),
-    stderr=subprocess.STDOUT,
-)
+print("Startup complete")
 
 

@@ -21,7 +21,7 @@ host_receive_com = config['ports']['host_receive_com']
 if not config['predictor']['connect_to_external_motion_estimation']:
     port_receive_com = config['ports']['port_receive_com']
 else:
-    port_receive_com = config['ports']['mrtc_port']
+    port_receive_com = config['ports']['port_receive_from_circle']
 
 
 testing = False 
@@ -471,18 +471,18 @@ class predictor:
                     prediction = self.previous_prediction
 
             # Variant A: Get time between MRI and current, and add the time that the MLCs need to get to this position
-            latency_sam_lstm_ms = (
-                datetime.datetime.now().timestamp() * 1000
-                - timestamp_recv_mri / 1e6
-                + self.lookahead_time  # this should be MLC adaptation latency
-            )
-
-            # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
             #latency_sam_lstm_ms = (
             #    datetime.datetime.now().timestamp() * 1000
-            #    - self.prediction_done_timestamp * 1000
-            #    + self.lookahead_time   # this should be end-to-end latency
+            #    - timestamp_recv_mri / 1e6
+            #    + self.lookahead_time  # this should be MLC adaptation latency
             #)
+
+            # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
+            latency_sam_lstm_ms = (
+                datetime.datetime.now().timestamp() * 1000
+                - self.prediction_done_timestamp * 1000
+                + self.lookahead_time   # this should be end-to-end latency
+            )
 
 
             print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")

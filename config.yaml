@@ -10,11 +10,12 @@ ports:
   # Predictors
   host_receive_com: '0.0.0.0'
   port_receive_com: 9002
+  port_receive_from_circle: 6055
   host_send_pred: '0.0.0.0'
   port_send_pred: 9003
 
   # GUI
-  host_gui: 'gui_container'
+  host_gui: 'gui_container_local'
   port_gui_predictions: 7005
   port_gui_images: 7000
   port_gui_clicks: 8000
@@ -22,9 +23,9 @@ ports:
 
 # Global settings
 settings:
-  emulation: True
-  MRTC: False
-  ZMQ: False
+  emulation: False
+  MRTC: True
+  ZMQ: True
   emu_path: "/utrecht_exp/data/circle"
 
   timestamps: True
@@ -32,9 +33,27 @@ settings:
   enable_gui: True
   interactive: True
 
+paths:
+  code_path: "/local_scratch/cschorli/track_predict_utrecht"
+  pred_name: "prediction_container_main"
+  track_name: "tracking_container_main"
+  gui_name: "gui_container_main"
+
+  # Hapkin
+  pred_im: "prediction_image:latest"
+  track_im: "motion_estimation_image:3"
+  gui_im: "gui_image:latest"
+
+
+  # Nicolas Machine
+  #pred_im: "gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:01"
+  #track_im: "gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:seg_02"
+  #gui_im: "gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:gui_02"
+
+
 #SAM settings
 tracker:
-  sam_type: 'small' # tiny, small, or large
+  sam_type: 'large' # tiny, small, or large
   sam_mask_threshold: 0
   sam_downcast_dtype: 'float16'
   image_height: 128
@@ -46,9 +65,9 @@ tracker:
 predictor:
   pred_type: 'lstm'
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
-  no_prediction: False
-  connect_to_external_motion_estimation: False
-  lookahead_time: 100 #ms
+  no_prediction: True
+  connect_to_external_motion_estimation: True
+  lookahead_time: 171 #ms
   framerate: 10
 
 
