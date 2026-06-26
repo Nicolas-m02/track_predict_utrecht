@@ -180,7 +180,7 @@ class predictor:
         self.previous_prediction = None
         self.latest_timestamp_recv_mri = None
         self.previous_timestamp_recv_mri = None
-        self.prediction_done_timestamp = None
+        self.prediction_done_timestamp = 0
         self.lookahead_time = config['predictor']['lookahead_time']
         self.prediction_lock = threading.Lock()
 
@@ -216,9 +216,10 @@ class predictor:
             with open(self.log_file_path_pred, 'w') as f:
                 f.write('Predictions, sent after request from MLC \n')
                 f.write('=======================\n')
+                f.write(f'lookahead time: {self.lookahead_time}')
 
         if config['logging']['lstm_optimization_log']:
-            self.log_file_path_optimization = LOG_DIR_LSTM / f"online_log_{ts}.txt"
+            self.log_file_path_optimization = LOG_DIR_LSTM / f"online_lstm_opt_log_{ts}.txt"
             with open(self.log_file_path_optimization, 'w') as f:
                 f.write('Online optimization log\n')
                 f.write('=======================\n')
@@ -383,9 +384,11 @@ class predictor:
                                     self.latest_prediction = output.copy()                        
                         self.current_prediction_point += 1
                         self.gui_queue.put_nowait(output)
-                        self.prediction_done_timestamp = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
-                        ts = self.prediction_done_timestamp.strftime("%Y%m%dT%H%M%S.%f")
-
+                        logging_pred_done_timestamp = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                        ts = logging_pred_done_timestamp.strftime("%Y%m%dT%H%M%S.%f")
+                        
+                        self.prediction_done_timestamp = datetime.datetime.now().timestamp()
+                        
                         if config['logging']['lstm_pred_log']:
                             with open(self.log_file_path_pred, 'a') as f:
                                 f.write(f"{ts}  INFO: Pred 1: {output[0,:]} \n")
@@ -506,18 +509,18 @@ class predictor:
 
 
             # Variant A: Get time between MRI and current, and add the time that the MLCs need to get to this position
-            latency_sam_lstm_ms = (
-                datetime.datetime.now().timestamp() * 1000
-                - timestamp_recv_mri / 1e6
-                + self.lookahead_time  # this should be MLC adaptation latency
-            )
-
-            # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
             #latency_sam_lstm_ms = (
             #    datetime.datetime.now().timestamp() * 1000
-            #    - self.prediction_done_timestamp * 1000
-            #    + self.lookahead_time   # this should be end-to-end latency
+            #    - timestamp_recv_mri / 1e6
+            #    + self.lookahead_time  # this should be MLC adaptation latency
             #)
+
+            # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
+            latency_sam_lstm_ms = (
+                datetime.datetime.now().timestamp() * 1000
+                - self.prediction_done_timestamp * 1000
+                + self.lookahead_time   # this should be end-to-end latency
+            )
 
             print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")
             interpolation_point = latency_sam_lstm_ms/ 1000 * self.img_frequency # ms -> prediction steps
@@ -548,10 +551,13 @@ class predictor:
             env.message_type = ps.Envelope.LETTER_REP
             self.conn_send.send(env.SerializeToString())
                             
-            
+            now = datetime.datetime.now()
+            ts = now.strftime("%Y%m%dT%H%M%S.%f")
+
             if config['logging']['lstm_pred_log']:
                 with open(self.log_file_path_pred, 'a') as f:
-                    f.write(f"Sent prediction: {interpolated_prediction_mm} mm at {datetime.datetime.now()}\n")
+                    f.write(f"{ts} INFO:    current latency: {latency_sam_lstm_ms}\n")
+                    f.write(f"{ts} INFO:   sent prediction: {interpolated_prediction_mm} mm\n")
 
             next_time += period
             sleep_time = next_time - time.perf_counter()

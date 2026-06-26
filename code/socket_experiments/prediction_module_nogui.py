@@ -12,6 +12,8 @@ import numpy as np
 import datetime
 import PositionServer_pb2 as ps
 import yaml
+from backports.zoneinfo import ZoneInfo
+
 
 with open('/utrecht_exp/config.yaml', 'r') as f:
     config = yaml.safe_load(f)
@@ -183,7 +185,7 @@ class predictor:
         self.previous_prediction = None
         self.latest_timestamp_recv_mri = None
         self.previous_timestamp_recv_mri = None
-        self.prediction_done_timestamp = None
+        self.prediction_done_timestamp = 0
         self.lookahead_time = config['predictor']['lookahead_time']
         self.prediction_lock = threading.Lock()
 
@@ -377,13 +379,20 @@ class predictor:
                                     self.previous_prediction = self.latest_prediction
                                     self.latest_prediction = output.copy()                        
                         self.current_prediction_point += 1
+
+
+                        logging_pred_done_timestamp = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                        ts = logging_pred_done_timestamp.strftime("%Y%m%dT%H%M%S.%f")
+                        
                         self.prediction_done_timestamp = datetime.datetime.now().timestamp()
-
-                        if self.logging:
+                        
+                        if config['logging']['lstm_pred_log']:
                             with open(f"/utrecht_exp/logs/online_log_{self.time_logging}.txt", 'a') as f:
-                                f.write(f"Prediction: {output[-1,:]} at {datetime.datetime.now()}\n")
-                                
-
+                                f.write(f"{ts}  INFO: Pred 1: {output[0,:]} \n")
+                                f.write(f"{ts}  INFO: Pred 2: {output[1,:]} \n")
+                                f.write(f"{ts}  INFO: Pred 3: {output[2,:]} \n")
+                                f.write(f"{ts}  INFO: Pred 4: {output[3,:]} \n")
+                            
                         #print("Queue size:", self.prediction_queue.qsize())
             
                 await asyncio.sleep(0.001) 
