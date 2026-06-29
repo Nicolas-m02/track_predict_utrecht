@@ -1,0 +1,82 @@
+services:
+  prediction:
+    image: prediction_image
+    container_name: prediction_container
+    runtime: nvidia
+    shm_size: "10gb"
+
+    volumes:
+      - /home/cschorli/git/track_predict_utrecht:/utrecht_exp
+      - /home/cschorli:/utrecht_data
+
+    working_dir: /utrecht_exp
+
+    ports:
+      - "6055:6055"
+
+    command: python code/socket_experiments/prediction_module_with_gui.py
+
+    networks:
+      - network_sam
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  motion_estimation:
+    image: motion_estimation_image
+    container_name: motion_estimation_container
+    runtime: nvidia
+    shm_size: "10gb"
+
+    volumes:
+      - /home/cschorli/git/track_predict_utrecht:/utrecht_exp
+      - /home/cschorli:/utrecht_data
+
+    working_dir: /utrecht_exp
+
+    ports:
+      - "6056:6056"
+      - "4005:4005"
+
+    command: python /utrecht_exp/track_predict_utrecht/segmentation/point_tracking_module.py
+
+    networks:
+      - network_sam
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  gui:
+    image: gui_image
+    container_name: gui_container
+    runtime: nvidia
+    shm_size: "10gb"
+
+    volumes:
+      - /home/cschorli/git/track_predict_utrecht:/utrecht_exp
+      - /home/cschorli:/utrecht_data
+
+    working_dir: /utrecht_exp
+
+    ports:
+      - "6057:6057"
+
+    command: uvicorn track_predict_utrecht.gui_interactive.app2:app --host 0.0.0.0 --port 8500 --reload
+
+    networks:
+      - network_sam
+
+networks:
+  network_sam:
+    external: true
+ 

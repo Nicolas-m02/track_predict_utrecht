@@ -13,7 +13,12 @@ import asyncio
 import matplotlib.pyplot as plt
 os.chdir("/utrecht_exp/segmentation/")
 import torch
-import math 
+import math
+import sys
+
+sys.path.append(str(Path(__file__).resolve().parents[1] / "code"))
+from socket_experiments import PositionServer_pb2 as ps
+
 
 with open("/utrecht_exp/config.yaml", 'r') as f:
     import yaml
@@ -24,8 +29,23 @@ with open("/utrecht_exp/config.yaml", 'r') as f:
 host_rec = '0.0.0.0' 
 port_rec = 6056
 
-host_send = config['ports']['host_send_com']
-port_send = config['ports']['port_send_com']
+
+
+
+
+
+if config['tracker']['connect_to_external_predictor']:
+    host_send = config['ports']['host_send_com_to_extern']
+    port_send = config['ports']['port_send_com_to_extern']
+else:
+    host_send = config['ports']['host_send_com']
+    port_send = config['ports']['port_send_com']
+
+
+
+
+
+
 # Gui configs
 host_gui = config['ports']['host_gui']
 port_gui = config['ports']['port_gui_images']
@@ -86,7 +106,7 @@ def torch_center_of_mass(mask, img_size_px, interpol, voxel_size_mm):
 class ReceiveImages:
     # Init functions to set up queues, SAM, connections
 
-    def __init__(self, image_dimensions=(128,128),send_data=False,protocol='tcp',max_queue_size=20,send_timestamps=False):
+    def __init__(self, image_dimensions=(128,128),send_data=False,protocol='tcp',max_queue_size=1000,send_timestamps=False):
         #self.seen_images = []
 
          # Receiving data params
@@ -219,7 +239,16 @@ class ReceiveImages:
                 raise ValueError("Protocol must be 'tcp' or 'udp'")
 
     def connect_send(self, host=host_send, port=port_send):
-        if self.send_data:
+        if config['tracker']['connect_to_external_predictor']:
+            import zmq
+            self.context = zmq.Context()
+            self.socket = self.context.socket(zmq.PUB)
+            self.socket.bind(f"tcp://{host}:{port}")
+            print(f"Connecting to atlantictracking on {host}:{port}...")
+            print(self.socket.getsockopt(zmq.LAST_ENDPOINT))
+            self.conn_send = self.socket
+        else:
+            print(f"Connecting to pprediction container on {host}:{port}...")
             if self.protocol.lower() == 'tcp':
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.send_socket.connect((host, port))
@@ -229,8 +258,6 @@ class ReceiveImages:
             else:
                 raise ValueError("Protocol must be 'tcp' or 'udp'")
             print(f"Connected to server at {host}:{port} for sending data, using protocol {self.protocol.lower()}")
-        else:
-            print("send_data is False, not connecting to send socket")
 
     def connect_to_gui(self, host=host_gui, port=port_gui):
         self.gui_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -380,8 +407,6 @@ class ReceiveImages:
 
             
             prep_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-            start_time = time.time()
-
             prep_image = cv2.resize(
                 prep_image,
                 None,
@@ -389,8 +414,6 @@ class ReceiveImages:
                 fy=self.interpolation_scale,
                 interpolation=cv2.INTER_LINEAR
             )            
-            end_time = time.time()
-            print(f" {end_time - start_time:.4f} seconds")
             if self.send_timestamps:
                 self.preprocessed_images_queue.put_nowait((prep_image, timestamp))
             else:
@@ -405,7 +428,6 @@ class ReceiveImages:
                 image = await self.preprocessed_images_queue.get()            
             if (self.click_received or self.mask_received) or self.frame_no != 0:
                 self.frame_no += 1
-                print(self.frame_no)
                 with torch.inference_mode():
                         with torch.autocast('cuda', dtype=self.downcast_dtype):
 
@@ -476,25 +498,46 @@ class ReceiveImages:
             await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
     async def send_com(self):
-        if self.send_data:
-            while True:
-                if self.send_timestamps:
-                    new_com, tstamp_send = await self.coms_queue.get()
+
+        while True:
+            if self.send_timestamps:
+                new_com, tstamp_send = await self.coms_queue.get()
+            else:
+                new_com = await self.coms_queue.get()
+
+
+            if self.send_data:
+
+                if config['tracker']['connect_to_external_predictor']:
+
+                    # create and send message
+                    vec = ps.Vector()
+
+                    vec.x = float(new_com[0])
+                    vec.y = float(new_com[1])
+                    vec.z = float(0.0)
+
+
+                    print(datetime.datetime.now(),' current COM x y z ',vec.x,' ',vec.y,' ',vec.z)
+                    sub = ps.LetterPub()
+                    sub.payload = vec.SerializeToString()
+                    sub.message_type = ps.Letter.POSITION_VECTOR
+                    env = ps.Envelope()
+                    env.payload = sub.SerializeToString()
+                    env.message_type = ps.Envelope.LETTER_PUB
+                    self.conn_send.send(env.SerializeToString())
+                                
+
                 else:
-                    new_com = await self.coms_queue.get()
 
-
-                if self.send_data:
                     if self.frame_no == 1:
                         print(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}")
                         if self.send_timestamps:
-                            #print(f"Timestamp sent: {tstamp_send/1e9} seconds")
                             value = struct.pack('2fQ', new_com[0], new_com[1], tstamp_send)  # Convert the float and timestamp to bytes
                         else:
                             value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
                     else:
                         if self.send_timestamps:
-                            #print(f"Timestamp sent: {tstamp_send/1e9} seconds")
                             value = struct.pack('2fQ', new_com[0], new_com[1], tstamp_send)  # Convert the float and timestamp to bytes
                         else:
                             value = struct.pack('2f', new_com[0], new_com[1])  # Convert the float to bytes
@@ -509,7 +552,7 @@ class ReceiveImages:
                     if config["logging"]["debug"]:
                         with open(self.receive_images_exit_log, 'a') as f:
                             f.write(f"Sent center of mass for frame {self.frame_no}: {new_com} at {ts}\n")
-                await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
+            await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
     # GUI main function 
 
     async def send_im_and_mask_to_gui(self):

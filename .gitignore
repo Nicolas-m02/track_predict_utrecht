@@ -14,8 +14,8 @@
 *.pth
 *.tsv
 *.txt
-/segmentation/sam2/*
-*/__pycache__/
+segmentation/sam2/**/__pycache__/
+*.pyc
 core
 *.log
 /gui_interactive/received_mask.mha

@@ -2,20 +2,22 @@
 ports:
   # Trackers
   mrtc_port: 4005
-  stack_update_host: '0.0.0.0'
+  stack_update_host: 'localhost'
   stack_update_port: 54323
   host_send_com: 'prediction_container'
   port_send_com: 9002
+  host_send_com_to_extern: 'localhost'
+  port_send_com_to_extern: 1550 # & put in positionSensor: PositionServerPort=1550
   
   # Predictors
   host_receive_com: '0.0.0.0'
   port_receive_com: 9002
-  port_receive_from_circle: 6055
+  port_receive_from_circle: 6055 # needs to be exposed & Port:6055, Type:PUB
   host_send_pred: '0.0.0.0'
   port_send_pred: 9003
 
   # GUI
-  host_gui: 'gui_container_local'
+  host_gui: 'gui_container'
   port_gui_predictions: 7005
   port_gui_images: 7000
   port_gui_clicks: 8000
@@ -23,7 +25,7 @@ ports:
 
 # Global settings
 settings:
-  emulation: False
+  emulation: True
   MRTC: True
   ZMQ: True
   emu_path: "/utrecht_exp/data/circle"
@@ -53,20 +55,21 @@ paths:
 
 #SAM settings
 tracker:
-  sam_type: 'large' # tiny, small, or large
+  sam_type: 'small' # tiny, small, or large
   sam_mask_threshold: 0
   sam_downcast_dtype: 'float16'
   image_height: 128
   image_width: 128
   px_size: 1.95
   prompt_library_path: '/utrecht_exp/segmentation/prompt_library/prompts_circle/'
+  connect_to_external_predictor: False
 
 # LSTM settings
 predictor:
   pred_type: 'lstm'
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
   no_prediction: True
-  connect_to_external_motion_estimation: True
+  connect_to_external_motion_estimation: False
   lookahead_time: 171 #ms
   framerate: 10
 

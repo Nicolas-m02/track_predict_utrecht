@@ -27,10 +27,10 @@ testing = False
 
 # change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
 host_receive_com = config['ports']['host_receive_com']
-if not config['predictor']['connect_to_external_motion_estimation']:
-    port_receive_com = config['ports']['port_receive_com']
-else:
+if config['predictor']['connect_to_external_motion_estimation']:
     port_receive_com = config['ports']['mrtc_port']
+else:
+    port_receive_com = config['ports']['port_receive_com']
 
 
 
