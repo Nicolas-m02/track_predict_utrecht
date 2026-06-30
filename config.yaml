@@ -70,7 +70,7 @@ predictor:
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
   no_prediction: True
   connect_to_external_motion_estimation: False
-  lookahead_time: 171 #ms
+  lookahead_time: 320 #ms
   framerate: 10
 
 
