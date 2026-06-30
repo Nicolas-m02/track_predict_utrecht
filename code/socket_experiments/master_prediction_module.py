@@ -529,11 +529,14 @@ class predictor:
             #)
 
             # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
+            average_minimal_latency_conversion_ms = 0.5 * 1000 / config['predictor']['framerate'] # ms
             latency_sam_lstm_ms = (
-                datetime.datetime.now().timestamp() * 1000
-                - self.prediction_done_timestamp * 1000
+                datetime.datetime.now().timestamp() * 1000 # ms
+                - self.prediction_done_timestamp * 1000 # ms
                 + self.lookahead_time   # this should be end-to-end latency
+                - average_minimal_latency_conversion_ms # adjust from average end-to-end latency to minimal latency (to adjust to current latency)
             )
+
 
             print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")
             interpolation_point = latency_sam_lstm_ms/ 1000 * self.img_frequency # ms -> prediction steps
@@ -571,7 +574,10 @@ class predictor:
                 with open(self.log_file_path_pred, 'a') as f:
                     f.write(f"{ts} INFO:    current latency: {latency_sam_lstm_ms}\n")
                     f.write(f"{ts} INFO:   sent prediction: {interpolated_prediction_mm} mm\n")
-
+                    
+                    f.write(f"{ts} INFO:    gantry angle (placeholder for now) is currently: templ_at_angle_90\n")
+                    f.write(f"{ts} INFO:    mean_x:{float(arr[0])}\n")
+                    f.write(f"{ts} INFO:    mean_y:{float(arr[1])}\n")
             next_time += period
             sleep_time = next_time - time.perf_counter()
 

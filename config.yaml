@@ -2,7 +2,7 @@
 ports:
   # Trackers
   mrtc_port: 4005
-  stack_update_host: 'localhost'
+  stack_update_host: 'localhost' #"172.17.0.1" "host.docker.internal"
   stack_update_port: 54323
   host_send_com: 'prediction_container_main'
   port_send_com: 9002
@@ -28,23 +28,25 @@ settings:
   emulation: True
   MRTC: False
   ZMQ: False
-  emu_path: "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
-
+  #emu_path: "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
+  emu_path: "/utrecht_exp/data/circle"
   timestamps: True
 
-  enable_gui: False
-  interactive: False
+  enable_gui: True
+  interactive: True
 
 paths:
   # code_path: "/local_scratch/cschorli/track_predict_utrecht" # Hapkin
-  code_path: "/project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp" # Nicolas Machine
+  # code_path: "/project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp" # Nicolas Machine
+  code_path: "/smb/user/cschorli/DS-Data/Radiotherapie/Research/User/cschorli/data_code/project_munich/track_predict_utrecht" # frontaal
   pred_name: "prediction_container_main"
   track_name: "tracking_container_main"
   gui_name: "gui_container_main"
 
   # Hapkin
   pred_im: "prediction_image:latest"
-  track_im: "motion_estimation_image:3"
+  track_im: "motion_estimation_image:latest"
+  #track_im: "motion_estimation_image:3"
   gui_im: "gui_image:latest"
 
 
@@ -71,9 +73,8 @@ predictor:
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
   no_prediction: True
   connect_to_external_motion_estimation: False
-  # lookahead_time: 171 #ms Variant A
-  lookahead_time: 263 #ms Variant B
-  E2E: 320 #ms
+  # lookahead_time: ~90 #ms Variant A MLC adaptation time
+  lookahead_time: 320 #ms Variant B E2E latency
   framerate: 10
 
 

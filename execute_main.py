@@ -2,7 +2,6 @@
 import subprocess
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 import time
 import yaml
 import datetime
@@ -86,7 +85,7 @@ docker run --rm --name {config["paths"]["pred_name"]} --gpus=all --shm-size=32G 
 -v {config["paths"]["code_path"]}:/utrecht_exp \
 --network network_testing \
 -w /utrecht_exp \
-gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:01 \
+{config["paths"]["pred_im"]} \
 bash -c 'cd code/socket_experiments && \
 python -m pip install pyyaml && \
 python {script_pred} --t_logging {ts}'
@@ -97,7 +96,7 @@ docker run --rm --name {config["paths"]["track_name"]} --gpus=all --shm-size=32G
 -v {config["paths"]["code_path"]}:/utrecht_exp \
 --network network_testing \
 -w /utrecht_exp \
-gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:seg_02 \
+{config["paths"]["track_im"]} \
 bash -c "apt update && \
 apt install -y libzmq5 libprotobuf32=3.21.12-11 && \
 pip install protobuf==3.20.0 && \
@@ -114,7 +113,7 @@ if config['settings']['enable_gui']:
     --network network_testing \
     -p {config['ports']['port_gui_ext']}:{config['ports']['port_gui_ext']} \
     -w /utrecht_exp \
-    gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:gui_02 \
+    {config["paths"]["gui_im"]} \
     bash -c "pip install uvicorn['standard'] opencv-python-headless SimpleITK fastapi && \
     cd /utrecht_exp/{gui_loc} && \
     uvicorn app2:app --reload --host 0.0.0.0 --port {config['ports']['port_gui_ext']}"

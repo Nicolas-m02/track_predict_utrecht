@@ -443,7 +443,6 @@ class ReceiveImages:
 
                 with torch.inference_mode():
                     with torch.autocast('cuda', dtype=self.downcast_dtype):
-                        # Interactive part
                         if self.frame_no == 1 or (self.click_received or self.mask_received): 
 
                             start_time_sam = time.time()
@@ -468,7 +467,7 @@ class ReceiveImages:
                                     print('Mask prompt initialized')
                             
                             # Prompt library mode
-                            if self.frame_no == 1 or (self.current_angle != self.last_angle) and not config['settings']['interactive']:
+                            if (self.frame_no == 1 or (self.current_angle != self.last_angle)) and not config['settings']['interactive']:
                                 if self.frame_no == 1:
                                     print(f"Initializing SAM {sam_type} with the first frame and prompt")
                                 else: 
