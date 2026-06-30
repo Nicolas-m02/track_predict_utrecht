@@ -11,10 +11,10 @@ with open("config.yaml", "r") as f:
 
 # cleanup any existing containers
 try:
-    subprocess.run(["docker", "rm", "-f", "prediction_container"], check=True)
-    subprocess.run(["docker", "rm", "-f", "tracking_container"], check=True)
+    subprocess.run(["docker", "rm", "-f", "prediction_container_main"], check=True)
+    subprocess.run(["docker", "rm", "-f", "tracking_container_main"], check=True)
     
-    subprocess.run(["docker", "rm", "-f", "gui_container"], check=True)
+    subprocess.run(["docker", "rm", "-f", "gui_container_main"], check=True)
 
 except subprocess.CalledProcessError as e:
     print(f"Error removing existing containers: {e}")

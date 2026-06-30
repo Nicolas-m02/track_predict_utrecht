@@ -4,7 +4,7 @@ ports:
   mrtc_port: 4005
   stack_update_host: 'localhost'
   stack_update_port: 54323
-  host_send_com: 'prediction_container'
+  host_send_com: 'prediction_container_main'
   port_send_com: 9002
   host_send_com_to_extern: 'localhost'
   port_send_com_to_extern: 1550 # & put in positionSensor: PositionServerPort=1550
@@ -17,7 +17,7 @@ ports:
   port_send_pred: 9003
 
   # GUI
-  host_gui: 'gui_container'
+  host_gui: 'gui_container_main'
   port_gui_predictions: 7005
   port_gui_images: 7000
   port_gui_clicks: 8000
@@ -26,17 +26,18 @@ ports:
 # Global settings
 settings:
   emulation: True
-  MRTC: True
-  ZMQ: True
-  emu_path: "/utrecht_exp/data/circle"
+  MRTC: False
+  ZMQ: False
+  emu_path: "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
 
   timestamps: True
 
-  enable_gui: True
-  interactive: True
+  enable_gui: False
+  interactive: False
 
 paths:
-  code_path: "/local_scratch/cschorli/track_predict_utrecht"
+  # code_path: "/local_scratch/cschorli/track_predict_utrecht" # Hapkin
+  code_path: "/project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp" # Nicolas Machine
   pred_name: "prediction_container_main"
   track_name: "tracking_container_main"
   gui_name: "gui_container_main"
@@ -70,7 +71,8 @@ predictor:
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
   no_prediction: True
   connect_to_external_motion_estimation: False
-  lookahead_time: 171 #ms
+  # lookahead_time: 171 #ms Variant A
+  lookahead_time: 263 #ms Variant B
   framerate: 10
 
 

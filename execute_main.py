@@ -5,33 +5,49 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import yaml
+import datetime
+from zoneinfo import ZoneInfo
+
 
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
-if config['settings']['enable_gui']:
-    script_pred = 'prediction_module_with_gui.py'
-    if config['settings']['interactive']:
-        script_track = 'point_tracking_module.py'
-        gui_loc = 'gui_interactive'
-        print("Starting the tracker in interactive mode...")
-    else:
-        script_track = 'improved_tracker_with_gui_support.py'
-        gui_loc = 'gui'
-        print("Starting the tracker with GUI support...")
+# OLD VERSION
+# if config['settings']['enable_gui']:
+#     script_pred = 'prediction_module_with_gui.py'
+#     if config['settings']['interactive']:
+#         script_track = 'point_tracking_module.py'
+#         gui_loc = 'gui_interactive'
+#         print("Starting the tracker in interactive mode...")
+#     else:
+#         script_track = 'improved_tracker_with_gui_support.py'
+#         gui_loc = 'gui'
+#         print("Starting the tracker with GUI support...")
 
 
-else:
-    script_pred = 'prediction_module_nogui.py'
-    script_track = 'improved_tracking_module.py'
-    print("Starting the modules without GUI...")
+# else:
+#     script_pred = 'prediction_module_nogui.py'
+#     script_track = 'improved_tracking_module.py'
+#     print("Starting the modules without GUI...")
+
+# NEW VERSION WITH MASTER SCRIPTS
+now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+ts = now.strftime("%Y%m%dT%H%M%S.%f")
+
+script_pred = 'master_prediction_module.py'
+script_track = 'master_tracking_module.py'
+if config['settings']['interactive']:
+    gui_loc = 'gui_interactive'
+else: 
+    gui_loc = 'gui'
+
 
 # cleanup any existing containers
 try:
-    subprocess.run(["docker", "rm", "-f", "prediction_container"], check=True)
-    subprocess.run(["docker", "rm", "-f", "tracking_container"], check=True)
+    subprocess.run(["docker", "rm", "-f", "prediction_container_main"], check=True)
+    subprocess.run(["docker", "rm", "-f", "tracking_container_main"], check=True)
     if config['settings']['enable_gui']:
-        subprocess.run(["docker", "rm", "-f", "gui_container"], check=True)
+        subprocess.run(["docker", "rm", "-f", "gui_container_main"], check=True)
 
     print("Removed existing containers if any.")
 except subprocess.CalledProcessError as e:
@@ -40,6 +56,31 @@ except subprocess.CalledProcessError as e:
 
 print(f'Running {script_pred} and {script_track} in Docker containers...')
 
+# cmd1 = f"""
+# docker run --rm --name {config["paths"]["pred_name"]} --gpus=all --shm-size=32G \
+# -v {config["paths"]["code_path"]}:/utrecht_exp \
+# --network network_testing \
+# -w /utrecht_exp \
+# gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:01 \
+# bash -c 'cd code/socket_experiments && \
+# python -m pip install pyyaml && \
+# python {script_pred}'
+# """
+
+# cmd2 = f"""
+# docker run --rm --name {config["paths"]["track_name"]} --gpus=all --shm-size=32G \
+# -v {config["paths"]["code_path"]}:/utrecht_exp \
+# --network network_testing \
+# -w /utrecht_exp \
+# gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:seg_02 \
+# bash -c "apt update && \
+# apt install -y libzmq5 libprotobuf32 && \
+# pip install pymri-0.1.0-cp311-cp311-linux_x86_64.whl && \
+# cd segmentation && \
+# python {script_track}"
+# """
+
+# NEW VERSION
 cmd1 = f"""
 docker run --rm --name {config["paths"]["pred_name"]} --gpus=all --shm-size=32G \
 -v {config["paths"]["code_path"]}:/utrecht_exp \
@@ -48,7 +89,7 @@ docker run --rm --name {config["paths"]["pred_name"]} --gpus=all --shm-size=32G 
 gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:01 \
 bash -c 'cd code/socket_experiments && \
 python -m pip install pyyaml && \
-python {script_pred}'
+python {script_pred} --t_logging {ts}'
 """
 
 cmd2 = f"""
@@ -58,10 +99,11 @@ docker run --rm --name {config["paths"]["track_name"]} --gpus=all --shm-size=32G
 -w /utrecht_exp \
 gitlab.lrz.de:5005/lmuk-radonc-phys-res/nmuehlschlegel/utrecht_experiments:seg_02 \
 bash -c "apt update && \
-apt install -y libzmq5 libprotobuf32 && \
+apt install -y libzmq5 libprotobuf32=3.21.12-11 && \
+pip install protobuf==3.20.0 && \
 pip install pymri-0.1.0-cp311-cp311-linux_x86_64.whl && \
 cd segmentation && \
-python {script_track}"
+python {script_track} --t_logging {ts}"
 """
 
 if config['settings']['enable_gui']:

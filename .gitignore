@@ -19,3 +19,4 @@ segmentation/sam2/**/__pycache__/
 core
 *.log
 /gui_interactive/received_mask.mha
+/code/local_experiments/

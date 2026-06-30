@@ -15,6 +15,11 @@ os.chdir("/utrecht_exp/segmentation/")
 import torch
 import math
 import sys
+import argparse
+
+parser = argparse.ArgumentParser(description='Master Tracking Module')
+parser.add_argument('--t_logging', type=str, default='TESTING', help='Timestamp for logging')
+args = parser.parse_args()
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "code"))
 from socket_experiments import PositionServer_pb2 as ps
@@ -135,12 +140,15 @@ class ReceiveImages:
         self.masks_queue = asyncio.Queue(maxsize=max_queue_size)
         self.coms_queue = asyncio.Queue(maxsize=max_queue_size)
         self.gui_queue = asyncio.Queue(maxsize=max_queue_size)
+        
+        # Non interactive mode
+        self.prompt_library = {}
         self.current_angle = None
         self.last_angle = 0
 
+        # Testing params
         self.prompt = None
         self.time_taken_per_frame = []
-        self.image_dimensions = image_dimensions
         self.send_data = send_data
 
         self.send_timestamps = send_timestamps
@@ -153,6 +161,7 @@ class ReceiveImages:
 
         self.voxel_size_mm = config['tracker']['px_size']
         self.img_size_px = image_dimensions[0]
+        self.image_dimensions = image_dimensions
 
         self.frame_no = 0
         self.out_masks = []  # List to store output masks for later saving
@@ -167,24 +176,24 @@ class ReceiveImages:
         print(f"SAM 2 {sam_type} initialized")
 
         # logging 
-        LOG_DIR_POINT_TRACKING = Path(config["logging"]["folder"]) / "point_tracking"
+        LOG_DIR_POINT_TRACKING = os.path.join(config["logging"]["folder"],args.t_logging, "tracking_module")
 
-        LOG_DIR_POINT_TRACKING.mkdir(parents=True, exist_ok=True)
+        os.makedirs(LOG_DIR_POINT_TRACKING, exist_ok=True)
 
         now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
         ts = now.strftime("%Y%m%dT%H%M%S.%f")
 
         if config["logging"]["sam_log"] or config["logging"]["debug"]:
 
-            LOG_FILE_PATH_EXIT = LOG_DIR_POINT_TRACKING / f"mri{ts}.txt"
+            LOG_FILE_PATH_EXIT = os.path.join(LOG_DIR_POINT_TRACKING, f"mri{ts}.txt")
             self.receive_images_exit_log = (LOG_FILE_PATH_EXIT)
             with open(self.receive_images_exit_log, "w") as f:
                 f.write(f"Log file created at {ts}\n\n")
 
         if config["logging"]["debug"]:
 
-            LOG_FILE_PATH_ENTER = LOG_DIR_POINT_TRACKING / f"receive_images_enter_{ts}.txt"
-            LOG_FILE_PATH_GUISENT = LOG_DIR_POINT_TRACKING / f"gui_sent_{ts}.txt"
+            LOG_FILE_PATH_ENTER = os.path.join(LOG_DIR_POINT_TRACKING, f"receive_images_enter_{ts}.txt")
+            LOG_FILE_PATH_GUISENT = os.path.join(LOG_DIR_POINT_TRACKING, f"gui_sent_{ts}.txt")
 
             self.receive_images_enter_log = (LOG_FILE_PATH_ENTER)
             self.gui_sent_log = (LOG_FILE_PATH_GUISENT)
@@ -248,7 +257,7 @@ class ReceiveImages:
             print(self.socket.getsockopt(zmq.LAST_ENDPOINT))
             self.conn_send = self.socket
         else:
-            print(f"Connecting to pprediction container on {host}:{port}...")
+            print(f"Connecting to prediction container on {host}:{port}...")
             if self.protocol.lower() == 'tcp':
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.send_socket.connect((host, port))
@@ -260,16 +269,18 @@ class ReceiveImages:
             print(f"Connected to server at {host}:{port} for sending data, using protocol {self.protocol.lower()}")
 
     def connect_to_gui(self, host=host_gui, port=port_gui):
-        self.gui_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.gui_socket.connect((host, port))
-        print(f"Connected to GUI at {host}:{port}")
+        if config["settings"]["enable_gui"]:
+            self.gui_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.gui_socket.connect((host, port))
+            print(f"Connected to GUI at {host}:{port}")
 
 
     def connect_clicks(self, host=host_clicks, port=port_clicks):
-        self.clicks_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.clicks_socket.connect((host, port))
-        self.clicks_socket.setblocking(False)
-        print(f"Connected to GUI for clicks at {host}:{port}")
+        if config["settings"]["enable_gui"] and config["settings"]["interactive"]:
+            self.clicks_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.clicks_socket.connect((host, port))
+            self.clicks_socket.setblocking(False)
+            print(f"Connected to GUI for clicks at {host}:{port}")
 
     # Splitting into easier and faster small blocks for better threading and less blockage
 
@@ -413,7 +424,7 @@ class ReceiveImages:
                 fx=self.interpolation_scale,
                 fy=self.interpolation_scale,
                 interpolation=cv2.INTER_LINEAR
-            )            
+            )
             if self.send_timestamps:
                 self.preprocessed_images_queue.put_nowait((prep_image, timestamp))
             else:
@@ -425,59 +436,97 @@ class ReceiveImages:
             if self.send_timestamps:
                 image, timestamp = await self.preprocessed_images_queue.get()
             else:
-                image = await self.preprocessed_images_queue.get()            
-            if (self.click_received or self.mask_received) or self.frame_no != 0:
+                image = await self.preprocessed_images_queue.get()  
+
+            if (self.click_received or self.mask_received) or self.frame_no != 0 or not config['settings']['interactive']:
                 self.frame_no += 1
+
                 with torch.inference_mode():
-                        with torch.autocast('cuda', dtype=self.downcast_dtype):
+                    with torch.autocast('cuda', dtype=self.downcast_dtype):
+                        # Interactive part
+                        if self.frame_no == 1 or (self.click_received or self.mask_received): 
 
-                            if self.frame_no == 1 or (self.click_received or self.mask_received): 
-                                print(f"Initializing SAM {sam_type} with the first frame and prompt")
+                            start_time_sam = time.time()
 
-                                start_time_sam = time.time()
+                            self.predictor.load_first_frame(image)
 
-                                self.predictor.load_first_frame(image)
+                            # Interactive
+                            if config['settings']['interactive']:
+                                print(f"Initializing SAM {sam_type} in interactive mode")
 
                                 if self.click_received:
                                     _,_, out_mask_logits = self.predictor.add_new_points(frame_idx=0, obj_id=0, points=np.array([self.click_coordinates]), labels=np.array([1]))
                                     self.click_received = False  # Reset click received flag after processing
                                     self.shift = torch_center_of_mass(out_mask_logits>sam_mask_threshold, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
                                     print(self.shift)
-
+                                    print('Point prompt initialized')
                                 elif self.mask_received:
                                     _,_, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.mask_data)
                                     self.mask_received = False  # Reset mask received flag after processing
                                     self.shift = torch_center_of_mass(out_mask_logits>sam_mask_threshold, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
                                     print(self.shift)
+                                    print('Mask prompt initialized')
+                            
+                            # Prompt library mode
+                            if self.frame_no == 1 or (self.current_angle != self.last_angle) and not config['settings']['interactive']:
+                                if self.frame_no == 1:
+                                    print(f"Initializing SAM {sam_type} with the first frame and prompt")
+                                else: 
+                                    print(f"Angle change detected (current: {self.current_angle}, last: {self.last_angle}), reinitializing SAM {sam_type} with new prompt")
 
-                                out_mask = out_mask_logits>sam_mask_threshold
-                                self.out_masks.append(out_mask)  # Store the first mask for later saving
-                                
-                                if self.send_timestamps:
-                                    self.masks_queue.put_nowait((out_mask,timestamp))
-                                else:
-                                    self.masks_queue.put_nowait(out_mask)                            
-                                
-                                print("First frame processed, starting tracking...")
-                                end_time_sam = time.time()
-                                print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
-                                self.gui_queue.put_nowait((image, out_mask))
+                                if testing:
+                                    print('Testing mode, default prompt used')
+                                    _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.prompt)
+
+                                else: 
+                                    # Find mask with specified angle 
+                                    #print(self.prompt_library.keys())
+                                    #print(self.prompt_library[str(self.current_angle)].shape)
+                                    if str(self.current_angle) not in self.prompt_library:
+                                        print(self.prompt_library.keys())
+                                        print(f"Current angle: {self.current_angle}")
+                                        print(f"Last angle: {self.last_angle}")
+                                        print(f"No prompt found for angle {self.current_angle}, using default prompt")
+                                        _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.last_angle)])
+                                    else:
+                                        print(f"Using prompt for angle {self.current_angle}")
+                                        _, _, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0,mask= self.prompt_library[str(self.current_angle)])
+                                    self.last_angle = self.current_angle
+                                    self.shift = torch_center_of_mass(out_mask_logits>sam_mask_threshold, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
+
+                            #####
+                            out_mask = out_mask_logits>sam_mask_threshold
+                            self.out_masks.append(out_mask)  # Store the first mask for later saving
+                            
+                            if self.send_timestamps:
+                                self.masks_queue.put_nowait((out_mask,timestamp))
                             else:
-                                
-                                _, out_mask_logits = self.predictor.track(image)
-                                
-                                out_mask = out_mask_logits>sam_mask_threshold
-                                
-                                self.out_masks.append(out_mask)  # Store the first mask for later saving
-                                
-                                if self.send_timestamps:
-                                    self.masks_queue.put_nowait((out_mask,timestamp))
-                                else:
-                                    self.masks_queue.put_nowait(out_mask)
+                                self.masks_queue.put_nowait(out_mask)                            
+                            
+                            print("First frame processed, starting tracking...")
+                            end_time_sam = time.time()
+                            print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
+                            if config["settings"]["enable_gui"]:
+                                self.gui_queue.put_nowait((image, out_mask))
+                        else:
+                            print('Tracking new mask')
+                            _, out_mask_logits = self.predictor.track(image)
+                            
+                            out_mask = out_mask_logits>sam_mask_threshold
+                            
+                            self.out_masks.append(out_mask)  # Store the first mask for later saving
+                            
+                            if self.send_timestamps:
+                                self.masks_queue.put_nowait((out_mask,timestamp))
+                            else:
+                                self.masks_queue.put_nowait(out_mask)
+                            if config["settings"]["enable_gui"]:
                                 self.gui_queue.put_nowait((image, out_mask))
 
             else:
-                self.gui_queue.put_nowait((image, torch.zeros(image.shape[:2], dtype=bool)))  # Send empty mask to GUI if no click received
+                # Send empty mask to GUI if no click received
+                if config["settings"]["enable_gui"]:
+                    self.gui_queue.put_nowait((image, torch.zeros(image.shape[:2], dtype=bool)))  
 
             await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
 
@@ -560,122 +609,140 @@ class ReceiveImages:
             contours, hierarchy = cv2.findContours(binary_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
             largest_contour = max(contours, key=lambda x: len(x))
             return np.array(largest_contour)[:,0,:]
+        if config["settings"]["enable_gui"]:
+            while True:
+                
+                image, mask = await self.gui_queue.get()
 
-        while True:
-            
-            image, mask = await self.gui_queue.get()
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                #print(image.shape, mask.shape)
+                #print(image.dtype, mask.dtype)
+                #print(np.max(mask.cpu().numpy()), np.min(mask.cpu().numpy()), mask.cpu().numpy().shape)
 
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-            #print(image.shape, mask.shape)
-            #print(image.dtype, mask.dtype)
-            #print(np.max(mask.cpu().numpy()), np.min(mask.cpu().numpy()), mask.cpu().numpy().shape)
+                image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                #print(mask.cpu().numpy().squeeze().astype(np.uint8).shape, np.unique(mask.cpu().numpy().astype(np.uint8)))
+                receiving_time_end = time.time()
+                #print(f"Received image and mask from queues in {receiving_time_end - receiving_time_start:.4f} seconds")
+                try:
+                    contour_time_start = time.time()
+                    image = cv2.drawContours(image.copy(), [compute_largest_contour(mask.cpu().numpy().squeeze().astype(np.uint8)*255)], -1, (255,255,255), 1)
+                    contour_time_end = time.time()
+                    #print(f"Time taken to compute largest contour: {contour_time_end - contour_time_start:.4f} seconds")
+                except Exception as e:
+                    print(f"Error occurred while drawing contours: {e}")
+                    pass
+                # Convert the image and mask to bytes
 
-            image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-            #print(mask.cpu().numpy().squeeze().astype(np.uint8).shape, np.unique(mask.cpu().numpy().astype(np.uint8)))
-            receiving_time_end = time.time()
-            #print(f"Received image and mask from queues in {receiving_time_end - receiving_time_start:.4f} seconds")
-            try:
-                contour_time_start = time.time()
-                image = cv2.drawContours(image.copy(), [compute_largest_contour(mask.cpu().numpy().squeeze().astype(np.uint8)*255)], -1, (255,255,255), 1)
-                contour_time_end = time.time()
-                #print(f"Time taken to compute largest contour: {contour_time_end - contour_time_start:.4f} seconds")
-            except Exception as e:
-                print(f"Error occurred while drawing contours: {e}")
-                pass
-            # Convert the image and mask to bytes
+                #print(image.dtype, image.shape)
 
-            #print(image.dtype, image.shape)
+                #_, img_encoded = cv2.imencode('.jpg', image)
+                #sending_time_start = time.time()
+                img_bytes = image.tobytes()
 
-            #_, img_encoded = cv2.imencode('.jpg', image)
-            #sending_time_start = time.time()
-            img_bytes = image.tobytes()
+                #print(img_encoded.dtype, img_encoded.shape)
 
-            #print(img_encoded.dtype, img_encoded.shape)
+                # send image 
+                img_size = len(img_bytes)
+                self.gui_socket.send(struct.pack('!I', img_size))  # Send the size of the image first
+                self.gui_socket.send(img_bytes)  # Then send the image data
 
-            # send image 
-            img_size = len(img_bytes)
-            self.gui_socket.send(struct.pack('!I', img_size))  # Send the size of the image first
-            self.gui_socket.send(img_bytes)  # Then send the image data
+                #sending_time_end = time.time()
+                #print(f"Sent image to GUI in {sending_time_end - sending_time_start:.4f} seconds")
+                end_time = time.time()
+                #print(f"Sent image and mask to GUI in {end_time - start_time:.4f} seconds")
+                if config["logging"]["debug"]:
+                    with open(self.gui_sent_log, 'a') as f:
+                        f.write(f"Sent image and mask for frame {self.frame_no} to GUI at {datetime.datetime.now()}\n")
 
-            #sending_time_end = time.time()
-            #print(f"Sent image to GUI in {sending_time_end - sending_time_start:.4f} seconds")
-            end_time = time.time()
-            #print(f"Sent image and mask to GUI in {end_time - start_time:.4f} seconds")
-            if config["logging"]["debug"]:
-                with open(self.gui_sent_log, 'a') as f:
-                    f.write(f"Sent image and mask for frame {self.frame_no} to GUI at {datetime.datetime.now()}\n")
-
-            await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
+                await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
 
     # Click functions
-    async def receive_clicks(self):
+    async def receive_clicks_masks(self):
         
-        # while True:
-        #     loop = asyncio.get_running_loop()
-        #     data = await loop.sock_recv(self.clicks_socket, 8)  # Assuming each click consists of two floats (x, y)
-        #     if data:
-        #         x, y = struct.unpack('2f', data)
-        #         print(f"Received click at coordinates: ({x}, {y})")
-        #     else: 
-        #         pass 
 
+        if config["settings"]["enable_gui"] and config["settings"]["interactive"]:
+            loop = asyncio.get_running_loop()
 
-        loop = asyncio.get_running_loop()
+            while True:
 
-        while True:
+                try:
+                    data = await asyncio.wait_for(
+                        loop.sock_recv(self.clicks_socket, 1),
+                        timeout=0.001
+                    )
 
-            try:
-                data = await asyncio.wait_for(
-                    loop.sock_recv(self.clicks_socket, 1),
-                    timeout=0.001
-                )
-
-                if data:
-                    msg_type = struct.unpack('B', data)[0]
-                    
-                    if msg_type == 0:  # Click
-                        click_data = await asyncio.wait_for(
-                            loop.sock_recv(self.clicks_socket, 8),
-                            timeout=0.001
-                        )
-                        if click_data:
-                            self.click_received = True
-                            x, y = struct.unpack('2f', click_data)
-                            self.click_coordinates = (x, y)
-                            print(f"Received click at coordinates: ({x}, {y})")
-                    
-                    elif msg_type == 1:  # Mask
-                        header_data = await asyncio.wait_for(
-                            loop.sock_recv(self.clicks_socket, 8),
-                            timeout=0.001
-                        )
-                        if header_data:
-                            width, height = struct.unpack('!II', header_data)
-                            mask_size = width * height
-                            
-                            mask_data = await asyncio.wait_for(
-                                loop.sock_recv(self.clicks_socket, mask_size),
-                                timeout=0.1
+                    if data:
+                        msg_type = struct.unpack('B', data)[0]
+                        
+                        if msg_type == 0:  # Click
+                            click_data = await asyncio.wait_for(
+                                loop.sock_recv(self.clicks_socket, 8),
+                                timeout=0.001
                             )
-                            if mask_data:
-                                self.mask_received = True
-                                mask_array = np.frombuffer(mask_data, dtype=np.uint8)
-                                mask_array = mask_array.reshape((height, width))
-                                self.mask_data = mask_array
-                                print(f"Received mask: {width}x{height}")
-                                print(f"Unique values in mask: {np.unique(mask_array)}")
-                                print(f"Mask data type: {mask_array.dtype}")
-                                print(f"Mask array shape: {mask_array.shape}")
+                            if click_data:
+                                self.click_received = True
+                                x, y = struct.unpack('2f', click_data)
+                                self.click_coordinates = (x, y)
+                                print(f"Received click at coordinates: ({x}, {y})")
+                        
+                        elif msg_type == 1:  # Mask
+                            header_data = await asyncio.wait_for(
+                                loop.sock_recv(self.clicks_socket, 8),
+                                timeout=0.001
+                            )
+                            if header_data:
+                                width, height = struct.unpack('!II', header_data)
+                                mask_size = width * height
+                                
+                                mask_data = await asyncio.wait_for(
+                                    loop.sock_recv(self.clicks_socket, mask_size),
+                                    timeout=0.1
+                                )
+                                if mask_data:
+                                    self.mask_received = True
+                                    mask_array = np.frombuffer(mask_data, dtype=np.uint8)
+                                    mask_array = mask_array.reshape((height, width))
+                                    self.mask_data = mask_array
+                                    print(f"Received mask: {width}x{height}")
+                                    print(f"Unique values in mask: {np.unique(mask_array)}")
+                                    print(f"Mask data type: {mask_array.dtype}")
+                                    print(f"Mask array shape: {mask_array.shape}")
 
 
-            except asyncio.TimeoutError:
-                pass
+                except asyncio.TimeoutError:
+                    pass
 
-            await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
+                await asyncio.sleep(0.005)  # Sleep briefly to avoid busy waiting
+
+
 
 
 
     # One time use functions
+
+    def initialize_prompt(self, prompt_library_path=None):
+        if testing:
+            import SimpleITK as sitk
+            self.prompt = sitk.GetArrayFromImage(sitk.ReadImage("/utrecht_exp/data/prompt.mha"))[0]
+            print('Initialized prompt')
+
+        else:
+            if config['settings']['interactive']:
+                print("Interactive mode enabled, waiting for user click or mask to initialize prompt")
+            if not config['settings']['interactive']:
+                import SimpleITK as sitk
+                for file in os.listdir(prompt_library_path):
+                    if file.endswith(".mha"):
+                        #print(file.split(".")[0].split("_")[-1])
+                        prompt = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(prompt_library_path, file)))[0]
+                        #print(prompt.shape)
+
+                        self.prompt_library[file.split(".")[0].split("_")[-1]] = prompt
+
+                        #print(f"Initialized prompt from {file}")
+                print(self.prompt_library.keys())
+                print(f"Initialized {len(self.prompt_library)} prompts from library")
+
 
 
     def close_connection(self):
@@ -695,6 +762,7 @@ class ReceiveImages:
 print("Initializing improved tracking module with gui support...")
 async def main():
     image_receiver = ReceiveImages(send_data=True,image_dimensions=(config['tracker']['image_height'], config['tracker']['image_width']),send_timestamps=config['settings']['timestamps'])
+    image_receiver.initialize_prompt(prompt_library_path=config['tracker']['prompt_library_path'])
     image_receiver.connect(host=host_rec, port=port_rec)
     image_receiver.connect_send(host=host_send, port=port_send)
     image_receiver.connect_to_gui(host=host_gui, port=port_gui)
@@ -707,7 +775,7 @@ async def main():
         image_receiver.postprocess_mask(),
         image_receiver.send_com(),
         image_receiver.send_im_and_mask_to_gui(),
-        image_receiver.receive_clicks()
+        image_receiver.receive_clicks_masks()
     )
 
 asyncio.run(main())
