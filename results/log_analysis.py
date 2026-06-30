@@ -8,8 +8,8 @@ from scipy.interpolate import interp1d
 
 
 # ------------------ Settings ------------------
-FREQ_RESP_CPM = 15#10.13                   # phantom period respiratory [s]
-AMP_PHANTOM_RESP_PP = 30                     # phantom amplitude [mm]
+FREQ_RESP_CPM = 15                   # phantom period respiratory [s]
+AMP_PHANTOM_RESP_PP = 20                     # phantom amplitude [mm]
 TRACE_FUNC_RESP = np.cos                  #reference motion function
 POWER_RESP = 1
 cardiac = False
@@ -23,7 +23,7 @@ ANGLE_DEG_PHANTOM = 0               # phantom rotation angle [deg]
 TRACKING_MODE = "BEV" # NONE | SAG | BEV
 
 
-START_ERROR_CALC_VALUE_Y = 10.01         # start evaluation after mean_y exceeds this
+START_ERROR_CALC_VALUE_Y = 8.01         # start evaluation after mean_y exceeds this
 EXCLUDE_AFTER_ANGLE_CHANGE_S = 1   # exclude time for plotting and calculatio of error after angle changed [s]
 
 SAVE_IMG = True
@@ -82,8 +82,9 @@ def parse_timestamp(ts: str) -> np.datetime64:
     return np.datetime64(f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}T{ts[9:11]}:{ts[11:13]}:{ts[13:]}")
 
 # ------------------ Log File Selection ------------------
-base_dir = os.path.dirname(os.path.abspath(__file__))   ######################################## 
-log_files = glob.glob(os.path.join(base_dir, "mri_emulatorapp_output/mri*"))    ################# might need to be adjusted
+base_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.abspath(os.path.join(base_dir, ".."))
+log_files = glob.glob(os.path.join(parent_dir, "logs/point_tracking/mri*"))
 if not log_files:
     raise FileNotFoundError("No log file matching 'mri*' found.")
 

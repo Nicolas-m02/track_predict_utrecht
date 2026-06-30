@@ -146,7 +146,7 @@ class predictor:
         print('Intialized LSTM model.')
 
         print(f'Device: {torch.cuda.get_device_name()}')
-        print(f'Cuda version: {torch.version.cuda}')
+        print(f'Cuda version: {torch.__version__}')
         
         self.current_data_point = 0
         self.current_prediction_point = 0
@@ -386,9 +386,7 @@ class predictor:
                         self.gui_queue.put_nowait(output)
                         logging_pred_done_timestamp = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
                         ts = logging_pred_done_timestamp.strftime("%Y%m%dT%H%M%S.%f")
-                        
-                        self.prediction_done_timestamp = datetime.datetime.now().timestamp()
-                        
+                                                
                         if config['logging']['lstm_pred_log']:
                             with open(self.log_file_path_pred, 'a') as f:
                                 f.write(f"{ts}  INFO: Pred 1: {output[0,:]} \n")
@@ -396,9 +394,8 @@ class predictor:
                                 f.write(f"{ts}  INFO: Pred 3: {output[2,:]} \n")
                                 f.write(f"{ts}  INFO: Pred 4: {output[3,:]} \n")
 
-                        #print("Queue size:", self.prediction_queue.qsize())
-            
                 await asyncio.sleep(0.001) 
+                self.prediction_done_timestamp = datetime.datetime.now().timestamp()
 
     async def optimize_online(self):
 
@@ -516,10 +513,12 @@ class predictor:
             #)
 
             # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
+            average_minimal_latency_conversion_ms = 0.5 * 1000 / config['predictor']['framerate']
             latency_sam_lstm_ms = (
-                datetime.datetime.now().timestamp() * 1000
-                - self.prediction_done_timestamp * 1000
+                datetime.datetime.now().timestamp() * 1000 # ms
+                - self.prediction_done_timestamp * 1000 # ms
                 + self.lookahead_time   # this should be end-to-end latency
+                - average_minimal_latency_conversion_ms # adjust from average end-to-end latency to minimal latency (to adjust to current latency)
             )
 
             print(f"Current latency for sam and lstm: {latency_sam_lstm_ms:.4f} ms")
@@ -559,6 +558,10 @@ class predictor:
                     f.write(f"{ts} INFO:    current latency: {latency_sam_lstm_ms}\n")
                     f.write(f"{ts} INFO:   sent prediction: {interpolated_prediction_mm} mm\n")
 
+                    f.write(f"{ts} INFO:    gantry angle is currently: templ_at_angle_90\n")
+                    f.write(f"{ts} INFO:    mean_x:{float(arr[0])}\n")
+                    f.write(f"{ts} INFO:    mean_y:{float(arr[1])}\n")
+                    
             next_time += period
             sleep_time = next_time - time.perf_counter()
 

@@ -73,6 +73,7 @@ predictor:
   connect_to_external_motion_estimation: False
   # lookahead_time: 171 #ms Variant A
   lookahead_time: 263 #ms Variant B
+  E2E: 320 #ms
   framerate: 10
 
 
