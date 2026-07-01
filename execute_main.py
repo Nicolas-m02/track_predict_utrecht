@@ -83,6 +83,7 @@ print(f'Running {script_pred} and {script_track} in Docker containers...')
 cmd1 = f"""
 docker run --rm --name {config["paths"]["pred_name"]} --gpus=all --shm-size=32G \
 -v {config["paths"]["code_path"]}:/utrecht_exp \
+-p {config["ports"]["port_send_pred"]}:{config["ports"]["port_send_pred"]} \
 --network network_testing \
 -w /utrecht_exp \
 {config["paths"]["pred_im"]} \
@@ -94,6 +95,9 @@ python {script_pred} --t_logging {ts}'
 cmd2 = f"""
 docker run --rm --name {config["paths"]["track_name"]} --gpus=all --shm-size=32G \
 -v {config["paths"]["code_path"]}:/utrecht_exp \
+-p {config["ports"]["mrtc_port"]}:{config["ports"]["mrtc_port"]} \
+-p {config["ports"]["port_send_com_to_extern"]}:{config["ports"]["port_send_com_to_extern"]} \
+--expose {config["ports"]["stack_update_port"]} \
 --network network_testing \
 -w /utrecht_exp \
 {config["paths"]["track_im"]} \
@@ -133,7 +137,7 @@ p1 = subprocess.Popen(
 
 if config['settings']['enable_gui']:
     print("Starting the prediction module with GUI...")
-    time.sleep(10)
+    time.sleep(1)
     print(f"Pinging adress at {config['ports']['port_gui_ext']}")
     p4 = subprocess.Popen(
         ["bash", "-c", f"curl http://localhost:{config['ports']['port_gui_ext']}/"],
@@ -149,7 +153,7 @@ if config['settings']['enable_gui']:
 else:
     print("Starting the prediction module...")
 
-time.sleep(15)
+time.sleep(1)
 
 
 print("Starting tracker ...")

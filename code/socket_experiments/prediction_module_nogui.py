@@ -234,7 +234,8 @@ class predictor:
             self.socket = self.context.socket(zmq.SUB)
             self.socket.bind(f"tcp://{host}:{port}")
             self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
-            print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
+            print("External motion estimation.")
+            print(f"Prediction module receiving over ZMQ connection on {host}:{port}...")
             self.conn = self.socket
         else:
             self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -253,7 +254,7 @@ class predictor:
             self.context = zmq.Context()
             self.socket = self.context.socket(zmq.REP)
             self.socket.bind(f"tcp://{host}:{port}")
-            print(f"Tracking module waiting for ZMQ connection on {host}:{port}...")
+            print(f"Prediction module sending on ZMQ over {host}:{port}...")
             print(self.socket.getsockopt(zmq.LAST_ENDPOINT))
             self.conn_send = self.socket
 
@@ -487,10 +488,12 @@ class predictor:
             #)
 
             # Variant B: deterine end-to-end latency and add time when prediction is ready to when it is requestedd by miniplan
+            average_minimal_latency_conversion_ms = 0.5 * 1000 / config['predictor']['framerate'] # ms
             latency_sam_lstm_ms = (
-                datetime.datetime.now().timestamp() * 1000
-                - self.prediction_done_timestamp * 1000
+                datetime.datetime.now().timestamp() * 1000 # ms
+                - self.prediction_done_timestamp * 1000 # ms
                 + self.lookahead_time   # this should be end-to-end latency
+                - average_minimal_latency_conversion_ms # adjust from average end-to-end latency to minimal latency (to adjust to current latency)
             )
 
 

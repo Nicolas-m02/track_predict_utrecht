@@ -177,7 +177,7 @@ class ReceiveImages:
 
         # logging 
         LOG_DIR_POINT_TRACKING = os.path.join(config["logging"]["folder"],args.t_logging, "tracking_module")
-
+        
         os.makedirs(LOG_DIR_POINT_TRACKING, exist_ok=True)
 
         now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
@@ -432,6 +432,10 @@ class ReceiveImages:
             #return prep_image
 
     async def track_frame(self):
+        def compute_largest_contour(binary_mask):
+            contours, hierarchy = cv2.findContours(binary_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+            largest_contour = max(contours, key=lambda x: len(x))
+            return np.array(largest_contour)[:,0,:]
         while True: 
             if self.send_timestamps:
                 image, timestamp = await self.preprocessed_images_queue.get()
@@ -463,6 +467,7 @@ class ReceiveImages:
                                     _,_, out_mask_logits = self.predictor.add_new_mask(frame_idx=0, obj_id=0, mask=self.mask_data)
                                     self.mask_received = False  # Reset mask received flag after processing
                                     self.shift = torch_center_of_mass(out_mask_logits>sam_mask_threshold, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
+                                    
                                     print(self.shift)
                                     print('Mask prompt initialized')
                             
@@ -493,7 +498,6 @@ class ReceiveImages:
                                     self.last_angle = self.current_angle
                                     self.shift = torch_center_of_mass(out_mask_logits>sam_mask_threshold, self.img_size_px*self.interpolation_scale, self.interpolation_scale, self.voxel_size_mm)
 
-                            #####
                             out_mask = out_mask_logits>sam_mask_threshold
                             self.out_masks.append(out_mask)  # Store the first mask for later saving
                             
@@ -502,6 +506,15 @@ class ReceiveImages:
                             else:
                                 self.masks_queue.put_nowait(out_mask)                            
                             
+                            prompt_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                            LOG_DIR_POINT_TRACKING = os.path.join(config["logging"]["folder"],args.t_logging, "tracking_module")
+
+                            prompt_image = cv2.normalize(prompt_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                            prompt_image = cv2.drawContours(prompt_image.copy(), [compute_largest_contour(out_mask.cpu().numpy().squeeze().astype(np.uint8)*255)], -1, (255,255,255), 1)                                    
+                            im_save_path = os.path.join(LOG_DIR_POINT_TRACKING, f"overlay_{self.frame_no:03d}.png")
+
+                            cv2.imwrite(im_save_path, prompt_image)
+
                             print("First frame processed, starting tracking...")
                             end_time_sam = time.time()
                             print(f"Time taken to process first frame with SAM: {end_time_sam - start_time_sam:.4f} seconds")
@@ -574,7 +587,7 @@ class ReceiveImages:
                     env.payload = sub.SerializeToString()
                     env.message_type = ps.Envelope.LETTER_PUB
                     self.conn_send.send(env.SerializeToString())
-                                
+                    print(f"Sent center of mass for frame {self.frame_no}: {new_com} at {datetime.datetime.now()}")
 
                 else:
 

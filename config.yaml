@@ -2,19 +2,19 @@
 ports:
   # Trackers
   mrtc_port: 4005
-  stack_update_host: 'localhost' #"172.17.0.1" "host.docker.internal"
+  stack_update_host: '172.17.0.1'
   stack_update_port: 54323
   host_send_com: 'prediction_container_main'
   port_send_com: 9002
-  host_send_com_to_extern: 'localhost'
-  port_send_com_to_extern: 1550 # & put in positionSensor: PositionServerPort=1550
+  host_send_com_to_extern: '0.0.0.0'
+  port_send_com_to_extern: 1660 # & put in positionSensor: PositionServerPort=1550
   
   # Predictors
   host_receive_com: '0.0.0.0'
   port_receive_com: 9002
   port_receive_from_circle: 6055 # needs to be exposed & Port:6055, Type:PUB
   host_send_pred: '0.0.0.0'
-  port_send_pred: 9003
+  port_send_pred: 9003 
 
   # GUI
   host_gui: 'gui_container_main'
@@ -25,28 +25,28 @@ ports:
 
 # Global settings
 settings:
-  emulation: True
-  MRTC: False
-  ZMQ: False
+  emulation: False
+  MRTC: True
+  ZMQ: True
   #emu_path: "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
-  emu_path: "/utrecht_exp/data/circle"
+  emu_path: "/utrecht_exp/data/10mm_slice"
   timestamps: True
 
-  enable_gui: True
-  interactive: True
+  enable_gui: False
+  interactive: False
 
 paths:
-  # code_path: "/local_scratch/cschorli/track_predict_utrecht" # Hapkin
+  code_path: "/local_scratch/cschorli/track_predict_utrecht" # Hapkin
   # code_path: "/project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp" # Nicolas Machine
-  code_path: "/smb/user/cschorli/DS-Data/Radiotherapie/Research/User/cschorli/data_code/project_munich/track_predict_utrecht" # frontaal
+  # code_path: "/smb/user/cschorli/DS-Data/Radiotherapie/Research/User/cschorli/data_code/project_munich/track_predict_utrecht" # frontaal
   pred_name: "prediction_container_main"
   track_name: "tracking_container_main"
   gui_name: "gui_container_main"
 
   # Hapkin
   pred_im: "prediction_image:latest"
-  track_im: "motion_estimation_image:latest"
-  #track_im: "motion_estimation_image:3"
+  # track_im: "motion_estimation_image:latest"
+  track_im: "motion_estimation_image:3"
   gui_im: "gui_image:latest"
 
 
@@ -71,11 +71,14 @@ tracker:
 predictor:
   pred_type: 'lstm'
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
-  no_prediction: True
-  connect_to_external_motion_estimation: False
+  no_prediction: False
+  connect_to_external_motion_estimation: True
   # lookahead_time: ~90 #ms Variant A MLC adaptation time
   lookahead_time: 320 #ms Variant B E2E latency
   framerate: 10
+  lr: 1e-5
+  epochs: 4
+
 
 
 # Logging 
@@ -85,4 +88,4 @@ logging:
   lstm_pred_log: True
   lstm_optimization_log: True
   gui_log: False
-  debug: False
+  debug: True

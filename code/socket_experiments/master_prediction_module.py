@@ -37,7 +37,7 @@ testing = False
 # change in MRTC to send positions:   sock_.connect("tcp://0.0.0.0:" + std::to_string(port)); (in zmqpub.cpp)
 host_receive_com = config['ports']['host_receive_com']
 if config['predictor']['connect_to_external_motion_estimation']:
-    port_receive_com = config['ports']['mrtc_port']
+    port_receive_com = config['ports']['port_receive_from_circle']
 else:
     port_receive_com = config['ports']['port_receive_com']
 
@@ -162,8 +162,8 @@ class predictor:
         self.current_optimization_point = 0
 
         # Online optimization parameters
-        self.optimizer = torch.optim.Adam(self.lstm_model.parameters(), lr=1e-5)
-        self.online_epochs = 4
+        self.optimizer = torch.optim.Adam(self.lstm_model.parameters(), lr=float(config['predictor']['lr']))
+        self.online_epochs = int(config['predictor']['epochs'])
         self.online_batch_size = 200
         self.online_batched_data = torch.zeros((1,self.input_size,self.input_dim)).float().to(device)
         self.online_input = torch.zeros((1,self.input_size-self.output_dim,self.input_dim)).float().to(device)
@@ -232,6 +232,14 @@ class predictor:
                 f.write('Online optimization log\n')
                 f.write('=======================\n')
 
+        if config["logging"]["debug"]:
+
+            LOG_FILE_PATH_ENTER = os.path.join(LOG_DIR_LSTM, f"receive_com_{ts}.txt")
+
+            self.receive_com_log = (LOG_FILE_PATH_ENTER)
+
+            with open(self.receive_com_log, "w") as f:
+                f.write(f"Log file created at {ts}\n\n")
 
         if self.no_prediction: 
             print("Running with no prediction")
@@ -297,6 +305,12 @@ class predictor:
                     timestamp_ns = time.time_ns()                        # timestamp not sent in msg therefore create timestamp when receiving motion
                     self.new_data_queue.put_nowait((data, timestamp_ns))       
 
+                    if config["logging"]["debug"]:
+                        now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                        ts = now.strftime("%Y%m%dT%H%M%S.%f")
+                        with open(self.receive_com_log, 'a') as f:
+                            f.write(f"Received com {data.item()} at {ts}\n")
+
                 else:
                     if self.receive_timestamps:
                         
@@ -310,12 +324,27 @@ class predictor:
                             buf += chunk
 
                         x, y, timestamp_ns = struct.unpack('2fQ', buf)
+                        if x is None or y is None or np.isnan(x) or np.isnan(y):
+                            print("Received None values for x or y. setting to 0")
+                            x = 0.0
+                            y = 0.0
                         data = torch.tensor([x,y]).to(device)
                         self.new_data_queue.put_nowait((data, timestamp_ns))
+                        if config["logging"]["debug"]:
+                            now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                            ts = now.strftime("%Y%m%dT%H%M%S.%f")
+                            with open(self.receive_com_log, 'a') as f:
+                                f.write(f"Received com {data.item()} at {ts}\n")
 
                     else:
                         data = torch.tensor(struct.unpack('2f', self.conn.recv(1024))).to(device)
                         self.new_data_queue.put_nowait((data, timestamp_ns))
+
+                        if config["logging"]["debug"]:
+                            now = datetime.datetime.now(ZoneInfo("Europe/Amsterdam"))
+                            ts = now.strftime("%Y%m%dT%H%M%S.%f")
+                            with open(self.receive_com_log, 'a') as f:
+                                f.write(f"Received com {data.item()} at {ts}\n")
 
             except Exception as e:
                 print(f"Error occurred: {e}")

@@ -322,7 +322,7 @@ class ReceiveImages:
                     elif key == "row_direction_cosines":
                         meta["row_direction_cosines"] = [float(x) for x in parts[1:]]
                         self.current_angle = int(np.round(math.degrees(math.atan2(meta["row_direction_cosines"][1], meta["row_direction_cosines"][0]))))
-                        print(f"Current angle: {self.current_angle}")
+                        #print(f"Current angle: {self.current_angle}")
                 raw = msg[idx + len(sep):]
 
                 arr = np.frombuffer(raw, dtype=np.float32)
@@ -526,6 +526,7 @@ class ReceiveImages:
                     env.payload = sub.SerializeToString()
                     env.message_type = ps.Envelope.LETTER_PUB
                     self.conn_send.send(env.SerializeToString())
+                    print("sending msg to atlantictracking" )
                                 
 
                 else:
