@@ -71,10 +71,11 @@ tracker:
 predictor:
   pred_type: 'lstm'
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
-  no_prediction: False
-  connect_to_external_motion_estimation: True
-  # lookahead_time: ~90 #ms Variant A MLC adaptation time
-  lookahead_time: 320 #ms Variant B E2E latency
+  no_prediction: True
+  connect_to_external_motion_estimation: False
+  # lookahead_time: 171 #ms Variant A
+  lookahead_time: 263 #ms Variant B
+  lookahead_time: 320 #ms
   framerate: 10
   lr: 1e-5
   epochs: 4

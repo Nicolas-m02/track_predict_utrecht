@@ -3,12 +3,13 @@ import numpy as np
 
 
 time_spacing = 10 # ms
-hz = 11 #Hz
-trace_spacing = 1000/11 # ms
+hz = 10 #Hz
+trace_spacing = 1000/10 # ms
 px_to_mm = 3.6
 
 # sample_trace = np.loadtxt('/utrecht_exp/data/eval_199CORfixed_angles_trace_3_outer.npy')*px_to_mm
 sample_trace = np.loadtxt('/utrecht_exp/data/quasar_traces/original_traces/2_2_COR_0_fixed_angles_trace_3_outer.npy')*px_to_mm
+# sample_trace = np.loadtxt('/utrecht_exp/data/quasar_traces/original_traces/V2_s___fixed_angles_trace_4_outer.npy')
 
 print(f"Sample trace shape: {sample_trace.shape}")
 print(f"Maximum value in sample trace: {np.max(sample_trace[:,1])-np.mean(sample_trace[:,1])} mm")
@@ -46,14 +47,39 @@ normalized_trace = 2 * ((interpolated_trace - np.min(interpolated_trace)) / (np.
 print(np.max(normalized_trace), np.min(normalized_trace))
 #%% save interpolated trace
 
-qrm_file = '/utrecht_exp/data/quasar_traces/qrm_converted/volunteer_outer-sector_trace.qrm'
+qrm_file = '/utrecht_exp/data/quasar_traces/qrm_converted/lmu_volunteer.qrm'
 
 with open(qrm_file, 'w') as f:
     f.write('% QUASAR Respiratory motion file\r\n')
     f.write(f'{normalized_trace.shape[0]}\r\n')
-    f.write('1.5\r\n') 
+    f.write(f'{(np.max(interpolated_trace) - np.min(interpolated_trace))/20}\r\n') 
     for val in normalized_trace:
         f.write(f'{val}\r\n')
+
+#%% visualization
+import matplotlib.pyplot as plt
+plt.figure(figsize=(12, 6))
+plt.plot(normalized_trace, label='Interpolated Trace')
+
+#%%
+
+def repeat_trace(trace, repeat_factor,hz):
+    print(f"Original trace shape: {trace.shape}")
+    print(f"Repeat factor: {repeat_factor}")
+    print(f"New trace shape: {trace.shape[0] * repeat_factor}")
+    print(f"New trace duration: {trace.shape[0] * repeat_factor / hz:.2f} seconds")
+    return np.tile(trace, repeat_factor)
+
+long_trace = repeat_trace(normalized_trace, 10,hz)
+
+ext_qrm_file = '/utrecht_exp/data/quasar_traces/qrm_converted/lmu_volunteer_long.qrm'
+with open(ext_qrm_file, 'w') as f:
+    f.write('% QUASAR Respiratory motion file\r\n')
+    f.write(f'{long_trace.shape[0]}\r\n')
+    f.write(f'{(np.max(interpolated_trace) - np.min(interpolated_trace))/20}\r\n') 
+    for val in long_trace:
+        f.write(f'{val}\r\n')
+
 
 
 #%% make lung and cardiac traces
@@ -116,7 +142,7 @@ plt.xlabel('Time (s)')
 plt.ylabel('Amplitude')
 plt.legend()    
 plt.subplot(2, 1, 2)
-plt.plot(heart_trace[:400], label='Heart Trace', color='orange')
+plt.plot(heart_trace[:400], label='Heart Trace')
 plt.title('Heart Trace')
 
 #%% heart and lung qrm files
@@ -145,20 +171,29 @@ interpolated_heart -= np.mean(interpolated_heart)
 interpolated_lung -= np.mean(interpolated_lung)
 
 print(np.max(interpolated_heart), np.min(interpolated_heart))
-print(f"Range of motion: {np.max(interpolated_heart) - np.min(interpolated_heart):.2f} mm")
+print(f"Range of heart motion: {np.max(interpolated_heart) - np.min(interpolated_heart):.2f} mm")
+range_heart = np.max(interpolated_heart) - np.min(interpolated_heart)
+
+print(np.max(interpolated_lung), np.min(interpolated_lung))
+print(f"Range of lung motion: {np.max(interpolated_lung) - np.min(interpolated_lung):.2f} mm")
+range_lung = np.max(interpolated_lung) - np.min(interpolated_lung)
 
 normalized_heart = 2 * ((interpolated_heart - np.min(interpolated_heart)) / (np.max(interpolated_heart) - np.min(interpolated_heart))) - 1
 normalized_lung = 2 * ((interpolated_lung - np.min(interpolated_lung)) / (np.max(interpolated_lung) - np.min(interpolated_lung))) - 1   
 
+print(np.max(normalized_heart), np.min(normalized_heart))
+print(np.max(normalized_lung), np.min(normalized_lung))
+
+
 #%%
 
-qrm_lung = '/utrecht_exp/results/quasar_traces/real_lung_trace.qrm'
-qrm_heart = '/utrecht_exp/results/quasar_traces/real_heart_trace.qrm'
+qrm_lung = '/utrecht_exp/results/quasar_traces/lmu_lung_trace.qrm'
+qrm_heart = '/utrecht_exp/results/quasar_traces/lmu_heart_trace.qrm'
 
 with open(qrm_lung, 'w') as f:
     f.write('% QUASAR Respiratory + Cardiac motion file\r\n')
     f.write(f'{normalized_lung.shape[0]}\r\n')
-    f.write('1.5\r\n') 
+    f.write(f'{range_lung/20}\r\n') 
     for val in normalized_lung:
         f.write(f'{val}\r\n')
 
@@ -166,8 +201,29 @@ with open(qrm_lung, 'w') as f:
 with open(qrm_heart, 'w') as f:
     f.write('% QUASAR Respiratory + Cardiac motion file\r\n')
     f.write(f'{normalized_heart.shape[0]}\r\n')
-    f.write('1.5\r\n') 
+    f.write(f'{range_heart/20}\r\n') 
     for val in normalized_heart:
         f.write(f'{val}\r\n')
 
+#%% extend both ttraces
+
+
+long_lung = repeat_trace(normalized_lung, 10, hz)
+long_heart = repeat_trace(normalized_heart, 10, hz)
+
+ext_lung_file = '/utrecht_exp/data/quasar_traces/qrm_converted/lmu_lung_long.qrm'
+with open(ext_lung_file, 'w') as f:
+    f.write('% QUASAR Respiratory motion file\r\n')
+    f.write(f'{long_lung.shape[0]}\r\n')
+    f.write(f'{range_lung/20}\r\n') 
+    for val in long_lung:
+        f.write(f'{val}\r\n')
+
+ext_heart_file = '/utrecht_exp/data/quasar_traces/qrm_converted/lmu_heart_long.qrm'
+with open(ext_heart_file, 'w') as f:
+    f.write('% QUASAR Respiratory motion file\r\n')
+    f.write(f'{long_heart.shape[0]}\r\n')
+    f.write(f'{range_heart/20}\r\n') 
+    for val in long_heart:
+        f.write(f'{val}\r\n')
 
