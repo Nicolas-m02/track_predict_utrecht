@@ -446,10 +446,14 @@ class ReceiveImages:
 
             if (self.click_received or self.mask_received) or self.frame_no != 0 or not config['settings']['interactive']:
                 self.frame_no += 1
+                if config['tracker']['prompt_delay'] > self.frame_no:
+                    print(f"Frame {self.frame_no} received, but prompt delay is set to {config['tracker']['prompt_delay']}. Waiting for next frame...")
+                    await asyncio.sleep(0.002)  # Sleep briefly to avoid busy waiting
+                    continue
 
                 with torch.inference_mode():
                     with torch.autocast('cuda', dtype=self.downcast_dtype):
-                        if self.frame_no == 1 or (self.click_received or self.mask_received): 
+                        if self.frame_no == 1 or self.frame_no == config['tracker']['prompt_delay'] or (self.click_received or self.mask_received): 
 
                             start_time_sam = time.time()
 
@@ -474,9 +478,11 @@ class ReceiveImages:
                                     print('Mask prompt initialized')
                             
                             # Prompt library mode
-                            if (self.frame_no == 1 or (self.current_angle != self.last_angle)) and not config['settings']['interactive']:
+                            if (self.frame_no == 1 or self.frame_no == config['tracker']['prompt_delay'] or (self.current_angle != self.last_angle)) and not config['settings']['interactive']:
                                 if self.frame_no == 1:
                                     print(f"Initializing SAM {sam_type} with the first frame and prompt")
+                                elif self.frame_no == config['tracker']['prompt_delay']:
+                                    print(f"Initializing SAM {sam_type} with the first frame and prompt after delay of {config['tracker']['prompt_delay']} frames")
                                 else: 
                                     print(f"Angle change detected (current: {self.current_angle}, last: {self.last_angle}), reinitializing SAM {sam_type} with new prompt")
 
@@ -519,7 +525,7 @@ class ReceiveImages:
 
                             prompt_save_path = os.path.join(LOG_DIR_POINT_TRACKING, f"image_{self.current_angle}.mha")
                             sitk.WriteImage(sitk.GetImageFromArray(image), prompt_save_path)
-
+                            print(f"Saved overlay image to {im_save_path} and prompt image to {prompt_save_path}")
 
                             print("First frame processed, starting tracking...")
                             end_time_sam = time.time()
