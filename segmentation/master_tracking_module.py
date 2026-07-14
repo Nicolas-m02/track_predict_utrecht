@@ -16,6 +16,8 @@ import torch
 import math
 import sys
 import argparse
+import SimpleITK as sitk
+
 
 parser = argparse.ArgumentParser(description='Master Tracking Module')
 parser.add_argument('--t_logging', type=str, default='TESTING', help='Timestamp for logging')
@@ -514,6 +516,10 @@ class ReceiveImages:
                             im_save_path = os.path.join(LOG_DIR_POINT_TRACKING, f"overlay_{self.frame_no:03d}.png")
 
                             cv2.imwrite(im_save_path, prompt_image)
+
+                            prompt_save_path = os.path.join(LOG_DIR_POINT_TRACKING, f"image_{self.current_angle}.mha")
+                            sitk.WriteImage(sitk.GetImageFromArray(image), prompt_save_path)
+
 
                             print("First frame processed, starting tracking...")
                             end_time_sam = time.time()
