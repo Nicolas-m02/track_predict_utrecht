@@ -7,7 +7,7 @@ ports:
   host_send_com: 'prediction_container_main'
   port_send_com: 9002
   host_send_com_to_extern: '0.0.0.0'
-  port_send_com_to_extern: 1660 # & put in positionSensor: PositionServerPort=1550
+  port_send_com_to_extern: 1660 # & put in positionSensor: PositionServerPort=1660
   
   # Predictors
   host_receive_com: '0.0.0.0'
@@ -29,11 +29,11 @@ settings:
   MRTC: True
   ZMQ: True
   #emu_path: "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
-  emu_path: "/utrecht_exp/data/10mm_slice"
+  emu_path: "/local_scratch/cschorli/20260702"
   timestamps: True
 
-  enable_gui: False
-  interactive: False
+  enable_gui: True
+  interactive: True
 
 paths:
   code_path: "/local_scratch/cschorli/track_predict_utrecht" # Hapkin
@@ -45,7 +45,7 @@ paths:
 
   # Hapkin
   pred_im: "prediction_image:latest"
-  # track_im: "motion_estimation_image:latest"
+  #track_im: "motion_estimation_image:latest"
   track_im: "motion_estimation_image:3"
   gui_im: "gui_image:latest"
 
@@ -73,8 +73,6 @@ predictor:
   lstm_model_path: '/utrecht_exp/all_arcs_all_sectors_raw_pretrained.pth'
   no_prediction: True
   connect_to_external_motion_estimation: False
-  # lookahead_time: 171 #ms Variant A
-  lookahead_time: 263 #ms Variant B
   lookahead_time: 320 #ms
   framerate: 10
   lr: 1e-5

@@ -95,6 +95,7 @@ python {script_pred} --t_logging {ts}'
 cmd2 = f"""
 docker run --rm --name {config["paths"]["track_name"]} --gpus=all --shm-size=32G \
 -v {config["paths"]["code_path"]}:/utrecht_exp \
+-v /local_scratch:/local_scratch \
 -p {config["ports"]["mrtc_port"]}:{config["ports"]["mrtc_port"]} \
 -p {config["ports"]["port_send_com_to_extern"]}:{config["ports"]["port_send_com_to_extern"]} \
 --expose {config["ports"]["stack_update_port"]} \
@@ -102,7 +103,7 @@ docker run --rm --name {config["paths"]["track_name"]} --gpus=all --shm-size=32G
 -w /utrecht_exp \
 {config["paths"]["track_im"]} \
 bash -c "apt update && \
-apt install -y libzmq5 libprotobuf32=3.21.12-11 && \
+apt install -y libzmq5 libprotobuf32 && \
 pip install protobuf==3.20.0 && \
 pip install pymri-0.1.0-cp311-cp311-linux_x86_64.whl && \
 cd segmentation && \
