@@ -427,6 +427,14 @@ class ReceiveImages:
                 fy=self.interpolation_scale,
                 interpolation=cv2.INTER_LINEAR
             )
+
+            # test intensity values
+            print(f"Preprocessed image intensity range: {prep_image.min()} - {prep_image.max()}")
+            if config['tracker']['clipping'] and config['tracker']['clipping_min'] is not None and config['tracker']['clipping_max'] is not None:
+                prep_image = np.clip(prep_image, config['tracker']['clipping_min'], config['tracker']['clipping_max'])
+                # normalize the left intensities to 0-255
+                prep_image = cv2.normalize(prep_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.float32)
+
             if self.send_timestamps:
                 self.preprocessed_images_queue.put_nowait((prep_image, timestamp))
             else:
@@ -508,7 +516,9 @@ class ReceiveImages:
 
                             out_mask = out_mask_logits>sam_mask_threshold
                             self.out_masks.append(out_mask)  # Store the first mask for later saving
-                            
+                            print(f"Frame {self.frame_no} processed, mask generated with shape {out_mask.shape} and dtype {out_mask.dtype}")
+                            print("Max value in mask:", out_mask.max().item())
+                            print("Min value in mask:", out_mask.min().item())
                             if self.send_timestamps:
                                 self.masks_queue.put_nowait((out_mask,timestamp))
                             else:
@@ -524,7 +534,7 @@ class ReceiveImages:
                             cv2.imwrite(im_save_path, prompt_image)
 
                             prompt_save_path = os.path.join(LOG_DIR_POINT_TRACKING, f"image_{self.current_angle}.mha")
-                            sitk.WriteImage(sitk.GetImageFromArray(image), prompt_save_path)
+                            sitk.WriteImage(sitk.GetImageFromArray(out_mask.cpu().numpy().squeeze().astype(np.uint8)), prompt_save_path)
                             print(f"Saved overlay image to {im_save_path} and prompt image to {prompt_save_path}")
 
                             print("First frame processed, starting tracking...")
@@ -758,8 +768,13 @@ class ReceiveImages:
                 for file in os.listdir(prompt_library_path):
                     if file.endswith(".mha"):
                         #print(file.split(".")[0].split("_")[-1])
-                        prompt = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(prompt_library_path, file)))[0]
-                        #print(prompt.shape)
+
+                        prompt = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(prompt_library_path, file)))
+                        print(f"Loaded prompt from {file} with shape {prompt.shape} and dtype {prompt.dtype}")
+                        if prompt.ndim == 3:
+                            print(f"Prompt {file} has 3D, excluding empty channel")
+                            prompt = prompt[0]  # Take the first slice if it's a 3D volume
+                        
 
                         self.prompt_library[file.split(".")[0].split("_")[-1]] = prompt
 

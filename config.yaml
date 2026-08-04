@@ -28,7 +28,7 @@ settings:
   emulation: False
   MRTC: True
   ZMQ: True
-  #emu_path: "/utrecht_exp/data/all_dat_files/dat_data/BEV_dat_data"
+  #emu_path: "/utrecht_exp/data/all_dat_files/dat_files_SAG"
   emu_path: "/local_scratch/cschorli/20260702"
   timestamps: True
 
@@ -38,16 +38,20 @@ settings:
 paths:
   code_path: "/local_scratch/cschorli/track_predict_utrecht" # Hapkin
   # code_path: "/project_data/mridian/mridian_tracking/nmuehlschlegel/utrecht_exp" # Nicolas Machine
-  # code_path: "/smb/user/cschorli/DS-Data/Radiotherapie/Research/User/cschorli/data_code/project_munich/track_predict_utrecht" # frontaal
+  #code_path: "/smb/user/cschorli/DS-Data/Radiotherapie/Research/User/cschorli/data_code/project_munich/track_predict_utrecht" # frontaal
   pred_name: "prediction_container_main"
   track_name: "tracking_container_main"
   gui_name: "gui_container_main"
 
   # Hapkin
   pred_im: "prediction_image:latest"
-  #track_im: "motion_estimation_image:latest"
   track_im: "motion_estimation_image:3"
   gui_im: "gui_image:latest"
+
+  # Frontaal
+  #pred_im: "prediction_image:latest"
+  #track_im: "motion_estimation_image:latest"
+  #gui_im: "gui_image:latest"
 
 
   # Nicolas Machine
@@ -64,8 +68,12 @@ tracker:
   image_height: 128
   image_width: 128
   px_size: 1.95
-  prompt_library_path: '/utrecht_exp/segmentation/prompt_library/prompts_circle/'
+  prompt_library_path: '/utrecht_exp/logs/20260804T113453.160593/tracking_module/'
   connect_to_external_predictor: False
+  prompt_delay: 50
+  clipping: True
+  clipping_min: 40 #SAG: 40
+  clipping_max: 1000 #SAG: 1000
 
 # LSTM settings
 predictor:
